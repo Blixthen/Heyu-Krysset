@@ -1,0 +1,78 @@
+"use client";
+
+import { useCrosswordRoom } from "@/hooks/useCrosswordRoom";
+import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
+import { Grid3x3 } from "lucide-react";
+import { useState } from "react";
+import { ChatPanel } from "./ChatPanel";
+import { CrosswordGrid, focusCell } from "./CrosswordGrid";
+import { PuzzleUploader } from "./PuzzleUploader";
+
+export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => void }) {
+  const room = useCrosswordRoom(nickname);
+  const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
+  const { puzzle, letters } = room.board;
+
+  function onPuzzle(next: CrosswordPuzzle) {
+    room.publishPuzzle(next);
+    const first = next.cells[0];
+    setSelectedCell(first ? { row: first.row, col: first.col } : null);
+    if (first) requestAnimationFrame(() => focusCell(first));
+  }
+
+  return (
+    <main className="flex h-dvh max-h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5">
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 items-center justify-center rounded-2xl bg-sky-400/15 text-sky-300">
+            <Grid3x3 className="size-5" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-50">Heyus Fredagskryss</p>
+            <p className="text-xs text-slate-400">Inloggad som {nickname}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} /> : null}
+          <button
+            type="button"
+            onClick={onLeave}
+            className="min-h-11 rounded-full border border-slate-700 px-3 py-1.5 text-sm font-bold text-slate-300 transition hover:border-slate-500 hover:text-white"
+          >
+            Byt namn
+          </button>
+        </div>
+      </header>
+
+      {room.shareError ? (
+        <p className="shrink-0 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">{room.shareError}</p>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(9.5rem,36dvh)] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-1">
+        <section className="flex min-h-0 items-stretch justify-center overflow-hidden p-2 sm:p-4">
+          {puzzle ? (
+            <CrosswordGrid
+              puzzle={puzzle}
+              letters={letters}
+              selectedCell={selectedCell}
+              onSelect={setSelectedCell}
+              onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
+            />
+          ) : (
+            <PuzzleUploader onPuzzle={onPuzzle} />
+          )}
+        </section>
+
+        <ChatPanel
+          clientId={room.clientId}
+          status={room.status}
+          connectionError={room.connectionError}
+          sendError={room.sendError}
+          messages={room.messages}
+          onSend={(text) => void room.sendMessage(text)}
+          onReconnect={room.reconnect}
+        />
+      </div>
+    </main>
+  );
+}

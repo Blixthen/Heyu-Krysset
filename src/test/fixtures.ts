@@ -1,4 +1,4 @@
-import type { LetterCell } from "@/lib/crossword";
+import type { CrosswordPuzzle, LetterCell } from "@/lib/crossword";
 
 /** A 3×3 grid of 100-unit cells starting at (100, 100). */
 export function gridCells(rows = 3, cols = 3): LetterCell[] {
@@ -9,4 +9,16 @@ export function gridCells(rows = 3, cols = 3): LetterCell[] {
     }
   }
   return cells;
+}
+
+export const TINY_JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+
+export function makePuzzle(overrides: Partial<CrosswordPuzzle> = {}): CrosswordPuzzle {
+  return {
+    id: "puzzle-1",
+    createdAt: 1_000,
+    image: TINY_JPEG,
+    cells: gridCells(),
+    ...overrides,
+  };
 }
