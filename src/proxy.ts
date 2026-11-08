@@ -1,13 +1,13 @@
-import { GATE_COOKIE, gateToken, passwordsMatch } from "@/lib/gate";
+import { GATE_COOKIE, hasValidGateCookie } from "@/lib/gate";
 import { NextResponse, type NextRequest } from "next/server";
+
+const PUBLIC_PATHS = new Set(["/login", "/api/unlock"]);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const password = process.env.APP_PASSWORD ?? "";
-  const expected = password ? gateToken(password) : "";
-  const allowed = Boolean(expected) && passwordsMatch(request.cookies.get(GATE_COOKIE)?.value ?? "", expected);
+  const allowed = hasValidGateCookie(request.cookies.get(GATE_COOKIE)?.value, process.env.APP_PASSWORD);
 
-  if (pathname === "/login" || pathname === "/api/unlock") {
+  if (PUBLIC_PATHS.has(pathname)) {
     if (pathname === "/login" && allowed) {
       return NextResponse.redirect(new URL("/", request.url));
     }
