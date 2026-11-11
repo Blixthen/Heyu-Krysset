@@ -21,10 +21,13 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
+      # Reads the pnpm version from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm test --if-present
-      - run: npm run deploy
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      # `pnpm deploy` is a built-in command; `run` calls the package script.
+      - run: pnpm run deploy
