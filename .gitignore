@@ -1,6 +1,22 @@
+# dependencies
 node_modules/
+
+# next.js / build output
 .next/
-.env.local
+out/
+*.tsbuildinfo
+
+# env files (commit .env.example only)
+.env*
+!.env.example
+
+# deployment
+.vercel/
 .open-next/
 .wrangler/
 .dev.vars*
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
