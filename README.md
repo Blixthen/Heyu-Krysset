@@ -29,8 +29,18 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Deploying
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
+(`.github/workflows/deploy.yml`), whoever the commit author is. One-time setup:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. In GitHub, add the repository secrets `CLOUDFLARE_API_TOKEN` (from the
+   "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`, plus the
+   repository variables `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+2. After the first deploy, set the runtime secrets:
+   `npx wrangler secret put APP_PASSWORD` and
+   `npx wrangler secret put GEMINI_API_KEY`.
+
+To run on the local Workers runtime, put those two secrets in `.dev.vars` and
+use `npm run preview`.
