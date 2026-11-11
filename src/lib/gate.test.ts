@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateToken, hasValidGateCookie, safeEqual } from "./gate";
+import { gateToken, hasValidGateCookie, roomTopic, safeEqual } from "./gate";
 
 describe("safeEqual", () => {
   it("matches equal strings", () => {
@@ -17,10 +17,16 @@ describe("safeEqual", () => {
   });
 });
 
-describe("gateToken", () => {
+describe("tokens", () => {
   it("derives distinct, deterministic values per password", () => {
     expect(gateToken("a")).toBe(gateToken("a"));
     expect(gateToken("a")).not.toBe(gateToken("b"));
+    expect(roomTopic("a")).not.toBe(roomTopic("b"));
+  });
+
+  it("does not reuse the gate cookie as the room topic", () => {
+    expect(roomTopic("a")).not.toContain(gateToken("a"));
+    expect(roomTopic("a")).toMatch(/^crossword-[A-Za-z0-9_-]{32}$/);
   });
 });
 

@@ -12,6 +12,15 @@ export function gateToken(password: string) {
 }
 
 /**
+ * Realtime channel name. Only handed out to unlocked clients, so knowing the
+ * public Supabase anon key alone is not enough to join the room.
+ * Rotates when the password changes.
+ */
+export function roomTopic(password: string) {
+  return `crossword-${hmac(password, "heyu-crossword-room").slice(0, 32)}`;
+}
+
+/**
  * Constant-time comparison that does not leak either input's length: both
  * sides are hashed to a fixed size before comparing. Empty strings never match.
  */

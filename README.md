@@ -1,33 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Heyus Fredagskryss
 
-## Getting Started
+Solve a crossword together in real time. One person photographs the puzzle,
+Gemini finds the letter squares, and everyone in the room types into the same
+grid and chats alongside it.
 
-First, run the development server:
+## Getting started
+
+Requires Node 26 (see `.nvmrc`).
 
 ```bash
+cp .env.example .env.local   # fill in the values
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000> and enter `APP_PASSWORD`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Script              | What it does                                      |
+| ------------------- | ------------------------------------------------- |
+| `npm run dev`       | Start the dev server                              |
+| `npm run build`     | Production build                                  |
+| `npm test`          | Run the Vitest suite                              |
+| `npm run lint`      | ESLint                                            |
+| `npm run typecheck` | Generate Next route types, then `tsc --noEmit`    |
+| `npm run preview`   | Build and run on the local Workers runtime        |
+| `npm run deploy`    | Build and deploy to Cloudflare Workers            |
 
 ## Deploying
 
@@ -44,3 +43,25 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
 
 To run on the local Workers runtime, put those two secrets in `.dev.vars` and
 use `npm run preview`.
+
+## How it fits together
+
+- **Password gate**: `src/proxy.ts` blocks everything except `/login` and
+  `/api/unlock` until the visitor has the `heyu_gate` cookie, an HMAC of
+  `APP_PASSWORD`.
+- **Room**: clients fetch the realtime channel name from `/api/room` (behind
+  the gate), so the public Supabase anon key alone is not enough to join.
+- **Analysis**: `/api/analyze-crossword` sends the photo to Gemini and returns
+  validated letter cells (`src/lib/analyze.ts`).
+- **Sync**: peers exchange chat messages, letters and the puzzle over Supabase
+  Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). Nothing is stored on a
+  server; when a client joins it asks the room for the current puzzle. The
+  newest puzzle wins and letters are merged (`src/lib/board.ts`). Every
+  payload from a peer is validated before use.
+
+### Known limitations
+
+- State lives only in connected browsers; when everyone leaves, the puzzle and
+  chat are gone.
+- Anyone with the password is trusted: they can replace the puzzle or use any
+  nickname.
