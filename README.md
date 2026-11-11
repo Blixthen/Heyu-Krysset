@@ -6,27 +6,30 @@ grid and chats alongside it.
 
 ## Getting started
 
-Requires Node 26 (see `.nvmrc`).
+Requires Node 26 (see `.nvmrc`) and pnpm 12. If you don't have pnpm, install
+it with `npx get-pnpm`.
 
 ```bash
 cp .env.example .env.local   # fill in the values
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open <http://localhost:3000> and enter `APP_PASSWORD`.
 
 ## Scripts
 
-| Script              | What it does                                      |
-| ------------------- | ------------------------------------------------- |
-| `npm run dev`       | Start the dev server                              |
-| `npm run build`     | Production build                                  |
-| `npm test`          | Run the Vitest suite                              |
-| `npm run lint`      | ESLint                                            |
-| `npm run typecheck` | Generate Next route types, then `tsc --noEmit`    |
-| `npm run preview`   | Build and run on the local Workers runtime        |
-| `npm run deploy`    | Build and deploy to Cloudflare Workers            |
+| Script            | What it does                                   |
+| ----------------- | ---------------------------------------------- |
+| `pnpm dev`        | Start the dev server                           |
+| `pnpm build`      | Production build                               |
+| `pnpm test`       | Run the Vitest suite                           |
+| `pnpm lint`       | ESLint                                         |
+| `pnpm typecheck`  | Generate Next route types, then `tsc --noEmit` |
+| `pnpm preview`    | Build and run on the local Workers runtime     |
+| `pnpm run deploy` | Build and deploy to Cloudflare Workers         |
+
+`pnpm deploy` is a built-in pnpm command, so the deploy script needs `pnpm run`.
 
 ## Deploying
 
@@ -38,11 +41,11 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
    repository variables `NEXT_PUBLIC_SUPABASE_URL` and
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 2. After the first deploy, set the runtime secrets:
-   `npx wrangler secret put APP_PASSWORD` and
-   `npx wrangler secret put GEMINI_API_KEY`.
+   `pnpm exec wrangler secret put APP_PASSWORD` and
+   `pnpm exec wrangler secret put GEMINI_API_KEY`.
 
 To run on the local Workers runtime, put those two secrets in `.dev.vars` and
-use `npm run preview`.
+use `pnpm preview`.
 
 ## How it fits together
 
