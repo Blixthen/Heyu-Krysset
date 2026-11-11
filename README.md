@@ -31,6 +31,9 @@ Open <http://localhost:3000> and enter `APP_PASSWORD`.
 
 `pnpm deploy` is a built-in pnpm command, so the deploy script needs `pnpm run`.
 
+Pull requests run lint, typecheck, tests and the Workers build in GitHub
+Actions (`.github/workflows/ci.yml`).
+
 ## Deploying
 
 Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
