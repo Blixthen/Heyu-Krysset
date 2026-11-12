@@ -37,6 +37,16 @@ export function jpegSize(bytes: Uint8Array): { width: number; height: number } {
   while (offset + 9 < bytes.length) {
     if (bytes[offset] !== 0xff) throw new Error("not a JPEG marker");
     const marker = bytes[offset + 1];
+    // 0xFF fill bytes may pad before a marker.
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    // TEM and RST0–7 stand alone, with no length field.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
     const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
     // SOF0–SOF15 carry the size, except DHT (C4), JPG (C8) and DAC (CC).
     if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {

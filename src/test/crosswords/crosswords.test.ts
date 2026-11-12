@@ -2,9 +2,11 @@ import { interpretReply, parseAnalyzeRequest } from "@/lib/analyze";
 import { gridCells } from "@/test/fixtures";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { jpegSize } from "./overlay";
 import {
   CROSSWORD_PHOTOS,
   findProblems,
+  photoPath,
   readPhotoBase64,
   replyPath,
   type CrosswordPhoto,
@@ -50,6 +52,25 @@ describe("findProblems", () => {
   });
 });
 
+describe("jpegSize", () => {
+  // SOI, an APP0 segment, then SOF0 for 300×200.
+  const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0xc8, 0x01, 0x2c, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
+  const app0 = [0xff, 0xe0, 0x00, 0x04, 0x00, 0x00];
+
+  it("reads the size from the start-of-frame marker", () => {
+    expect(jpegSize(Uint8Array.from([0xff, 0xd8, ...app0, ...sof]))).toEqual({ width: 300, height: 200 });
+  });
+
+  it("skips 0xFF fill bytes and standalone markers before it", () => {
+    const padded = [0xff, 0xd8, ...app0, 0xff, 0xff, 0xff, 0xd0, ...sof];
+    expect(jpegSize(Uint8Array.from(padded))).toEqual({ width: 300, height: 200 });
+  });
+
+  it("reads the real photos", () => {
+    expect(jpegSize(readFileSync(photoPath(CROSSWORD_PHOTOS[0])))).toEqual({ width: 1080, height: 1432 });
+  });
+});
+
 describe.each(CROSSWORD_PHOTOS)("crossword photo $name ($description)", (crossword) => {
   it("has labelled points inside the image", () => {
     const points = [...crossword.letterPoints, ...crossword.cluePoints];
@@ -62,20 +83,14 @@ describe.each(CROSSWORD_PHOTOS)("crossword photo $name ($description)", (crosswo
     expect(input.ok).toBe(true);
   });
 
-  // Separate from the replay, which may be an expected failure: a missing
-  // recording must always fail.
-  it("has a recorded Gemini reply", () => {
-    expect(existsSync(replyPath(crossword)), "no recorded reply; run `pnpm eval:record`").toBe(true);
-  });
-
-  // A reading with a known issue is expected to fail, so CI turns red once a
-  // prompt or model change fixes it and the knownIssue can be removed.
-  (crossword.knownIssue ? it.fails : it)(`replays its recorded Gemini reply into a usable grid${crossword.knownIssue ? ` (known issue: ${crossword.knownIssue})` : ""}`, () => {
-    const recorded = JSON.parse(readFileSync(replyPath(crossword), "utf8")) as RecordedReply;
-    expect(typeof recorded.reply.text).toBe("string");
+  it("replays its recorded Gemini reply into exactly its known problems", () => {
+    const path = replyPath(crossword);
+    expect(existsSync(path), "no recorded reply; run `pnpm eval:record`").toBe(true);
+    const recorded = JSON.parse(readFileSync(path, "utf8")) as RecordedReply;
+    expect(recorded.reply.text, "recorded reply is empty").toEqual(expect.stringMatching(/\S/));
 
     const result = interpretReply(recorded.reply);
     expect(result, `recorded with ${recorded.model}`).toMatchObject({ ok: true });
-    if (result.ok) expect(findProblems(crossword, result.value)).toEqual([]);
+    if (result.ok) expect(findProblems(crossword, result.value)).toEqual(crossword.knownProblems ?? []);
   });
 });

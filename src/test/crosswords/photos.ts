@@ -29,8 +29,12 @@ export type CrosswordPhoto = {
    */
   letterPoints: Point[];
   cluePoints: Point[];
-  /** Why the recorded reading is known to fail; its replay test then expects failure. */
-  knownIssue?: string;
+  /**
+   * The exact findProblems output for the recorded reply, so the replay test
+   * catches both a regression and an improvement (update the list then).
+   * The live eval reports these instead of failing, since readings vary.
+   */
+  knownProblems?: string[];
 };
 
 export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
@@ -40,7 +44,10 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 120,
     letterPoints: [[153, 67], [210, 543], [210, 804], [843, 629], [96, 846], [900, 543]],
     cluePoints: [[36, 29], [39, 325], [571, 214], [871, 414], [443, 414], [39, 804], [154, 543]],
-    knownIssue: "reads the ÖVERHÄNGANDE clue and a grey block as letter squares",
+    knownProblems: [
+      "clue area at (39, 325) read as letter square (6,0)",
+      "clue area at (154, 543) read as letter square (11,1)",
+    ],
   },
   {
     name: "psalmen",
@@ -48,7 +55,11 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 60,
     letterPoints: [[111, 423], [182, 476], [676, 587], [182, 750], [818, 93], [889, 697]],
     cluePoints: [[321, 179], [107, 364], [286, 929], [818, 529], [39, 529], [606, 914], [676, 425]],
-    knownIssue: "reads one square twice, and the KASSE/DANS and SLAPP clues as letter squares",
+    knownProblems: [
+      "cells (5,0) and (6,7) overlap",
+      "clue area at (107, 364) read as letter square (6,0)",
+      "clue area at (818, 529) read as letter square (9,9)",
+    ],
   },
   {
     name: "grillfest",
@@ -56,7 +67,13 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 90,
     letterPoints: [[161, 471], [780, 638], [100, 528], [533, 802], [841, 83], [904, 914]],
     cluePoints: [[286, 179], [471, 414], [36, 525], [841, 686], [471, 968], [904, 29]],
-    knownIssue: "misses letter squares, one in the yellow column, and reads three clues as letter squares",
+    knownProblems: [
+      "letter square at (780, 638) not found",
+      "letter square at (533, 802) not found",
+      "clue area at (841, 686) read as letter square (11,9)",
+      "clue area at (471, 968) read as letter square (16,6)",
+      "clue area at (904, 29) read as letter square (0,2)",
+    ],
   },
   {
     name: "badminton",
@@ -64,7 +81,10 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 100,
     letterPoints: [[225, 477], [726, 644], [114, 533], [782, 97], [336, 859], [671, 969]],
     cluePoints: [[300, 214], [57, 532], [559, 423], [838, 859], [838, 571], [950, 41]],
-    knownIssue: "reads the GRUNKA and DEN KAN BRYNÄS clues as letter squares",
+    knownProblems: [
+      "clue area at (838, 859) read as letter square (14,13)",
+      "clue area at (950, 41) read as letter square (0,5)",
+    ],
   },
   {
     name: "byn",
@@ -72,7 +92,10 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 100,
     letterPoints: [[616, 156], [89, 565], [324, 389], [675, 681], [851, 798], [148, 971]],
     cluePoints: [[286, 143], [558, 39], [324, 331], [675, 273], [793, 681], [31, 623], [558, 681]],
-    knownIssue: "misses the row of letter squares below TÅL MYCKET and the bottom-left square",
+    knownProblems: [
+      "letter square at (324, 389) not found",
+      "letter square at (148, 971) not found",
+    ],
   },
   {
     name: "nallar",
@@ -80,7 +103,11 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 100,
     letterPoints: [[549, 149], [251, 954], [123, 551], [336, 666], [890, 91], [719, 781]],
     cluePoints: [[250, 250], [506, 143], [633, 668], [377, 896], [846, 611], [974, 379]],
-    knownIssue: "reads the LITAUEN, DRAGET and VISARE clues as letter squares",
+    knownProblems: [
+      "clue area at (633, 668) read as letter square (8,14)",
+      "clue area at (377, 896) read as letter square (12,8)",
+      "clue area at (846, 611) read as letter square (7,19)",
+    ],
   },
   {
     name: "trott",
@@ -88,7 +115,13 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     minCells: 130,
     letterPoints: [[144, 406], [196, 451], [357, 634], [837, 132], [464, 771], [784, 954]],
     cluePoints: [[214, 179], [91, 361], [37, 679], [677, 587], [944, 41], [570, 86]],
-    knownIssue: "grid drifts by half a square, so clues are read as letter squares and one letter square is missed",
+    knownProblems: [
+      "letter square at (464, 771) not found",
+      "clue area at (91, 361) read as letter square (6,1)",
+      "clue area at (37, 679) read as letter square (13,0)",
+      "clue area at (677, 587) read as letter square (11,9)",
+      "clue area at (570, 86) read as letter square (0,0)",
+    ],
   },
 ];
 
