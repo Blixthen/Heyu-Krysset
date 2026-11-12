@@ -1,18 +1,25 @@
 import { gridCells } from "@/test/fixtures";
 import { describe, expect, it } from "vitest";
-import { AnalyzeError, extractJsonObject, MAX_IMAGE_BASE64_LENGTH, parseAnalyzeRequest, parseCells, stripDataUrl } from "./analyze";
+import {
+  buildGenerateRequest,
+  describeReply,
+  extractJsonObject,
+  interpretReply,
+  MAX_IMAGE_BASE64_LENGTH,
+  parseAnalyzeRequest,
+  parseCells,
+  stripDataUrl,
+  type Result,
+} from "./analyze";
 
-function expectAnalyzeError(fn: () => unknown, status: number, message?: RegExp) {
-  try {
-    fn();
-  } catch (error) {
-    expect(error).toBeInstanceOf(AnalyzeError);
-    expect((error as AnalyzeError).status).toBe(status);
-    if (message) expect((error as AnalyzeError).message).toMatch(message);
-    return;
-  }
-  throw new Error("expected an AnalyzeError");
+function expectFailure(result: Result<unknown>, status: number, message?: RegExp) {
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error.status).toBe(status);
+  if (message) expect(result.error.message).toMatch(message);
 }
+
+const ok = <T>(value: T) => ({ ok: true, value });
 
 describe("stripDataUrl", () => {
   it("removes a data URL prefix", () => {
@@ -23,37 +30,48 @@ describe("stripDataUrl", () => {
 
 describe("parseAnalyzeRequest", () => {
   it("accepts base64 with a known mime type", () => {
-    expect(parseAnalyzeRequest({ image: "data:image/png;base64,AAAA", mimeType: "image/png" })).toEqual({
-      image: "AAAA",
-      mimeType: "image/png",
-    });
+    expect(parseAnalyzeRequest({ image: "data:image/png;base64,AAAA", mimeType: "image/png" })).toEqual(
+      ok({ image: "AAAA", mimeType: "image/png" }),
+    );
   });
 
   it("falls back to jpeg for unknown mime types", () => {
-    expect(parseAnalyzeRequest({ image: "AAAA", mimeType: "image/svg+xml" }).mimeType).toBe("image/jpeg");
+    expect(parseAnalyzeRequest({ image: "AAAA", mimeType: "image/svg+xml" })).toEqual(
+      ok({ image: "AAAA", mimeType: "image/jpeg" }),
+    );
   });
 
   it("rejects missing, invalid and oversized images", () => {
-    expectAnalyzeError(() => parseAnalyzeRequest(null), 400);
-    expectAnalyzeError(() => parseAnalyzeRequest({ image: "  " }), 400, /saknas/);
-    expectAnalyzeError(() => parseAnalyzeRequest({ image: "not base64!" }), 400, /ogiltig/);
-    expectAnalyzeError(() => parseAnalyzeRequest({ image: "A".repeat(MAX_IMAGE_BASE64_LENGTH + 1) }), 413);
+    expectFailure(parseAnalyzeRequest(null), 400);
+    expectFailure(parseAnalyzeRequest({ image: "  " }), 400, /saknas/);
+    expectFailure(parseAnalyzeRequest({ image: "not base64!" }), 400, /ogiltig/);
+    expectFailure(parseAnalyzeRequest({ image: "A".repeat(MAX_IMAGE_BASE64_LENGTH + 1) }), 413);
+  });
+});
+
+describe("buildGenerateRequest", () => {
+  it("sends the image with structured output and an explicit token limit", () => {
+    const request = buildGenerateRequest("gemini-x", { image: "AAAA", mimeType: "image/png" });
+    expect(request.model).toBe("gemini-x");
+    expect(JSON.stringify(request.contents)).toContain('"data":"AAAA"');
+    expect(request.config?.responseSchema).toBeDefined();
+    expect(request.config?.maxOutputTokens).toBeGreaterThan(0);
   });
 });
 
 describe("extractJsonObject", () => {
   it("finds JSON surrounded by prose and code fences", () => {
-    expect(extractJsonObject('Here you go:\n```json\n{"cells":[{"a":"}"}]}\n```')).toEqual({ cells: [{ a: "}" }] });
+    expect(extractJsonObject('Here you go:\n```json\n{"cells":[{"a":"}"}]}\n```')).toEqual(ok({ cells: [{ a: "}" }] }));
   });
 
   it("handles escaped quotes inside strings", () => {
-    expect(extractJsonObject('{"a":"say \\"{hi}\\""}')).toEqual({ a: 'say "{hi}"' });
+    expect(extractJsonObject('{"a":"say \\"{hi}\\""}')).toEqual(ok({ a: 'say "{hi}"' }));
   });
 
-  it("throws a user-facing error for missing, truncated or invalid JSON", () => {
-    expectAnalyzeError(() => extractJsonObject("no json here"), 502);
-    expectAnalyzeError(() => extractJsonObject('{"cells":['), 502, /ofullständig/);
-    expectAnalyzeError(() => extractJsonObject("{cells: nope}"), 502, /ogiltig/);
+  it("reports missing, truncated or invalid JSON", () => {
+    expectFailure(extractJsonObject("no json here"), 502);
+    expectFailure(extractJsonObject('{"cells":['), 502, /ofullständig/);
+    expectFailure(extractJsonObject("{cells: nope}"), 502, /ogiltig/);
   });
 });
 
@@ -61,7 +79,7 @@ describe("parseCells", () => {
   const cells = gridCells();
 
   it("returns validated cells", () => {
-    expect(parseCells({ cells })).toEqual(cells);
+    expect(parseCells({ cells })).toEqual(ok(cells));
   });
 
   it("drops non-empty cell types and invalid cells", () => {
@@ -71,21 +89,53 @@ describe("parseCells", () => {
       { row: 6, col: 6, x: 1, y: 1, w: 10, h: 10, type: "image" },
       { row: 7, col: 7, x: 999, y: 1, w: 10, h: 10 },
     ];
-    expect(parseCells({ cells: noisy })).toEqual(cells);
+    expect(parseCells({ cells: noisy })).toEqual(ok(cells));
   });
 
   it("accepts [row, col, x, y, w, h] tuples and drops malformed ones", () => {
     const tuples = cells.map(({ row, col, x, y, w, h }) => [row, col, x, y, w, h]);
     const malformed = [[9, 9, 1, 1, 10], [9, 9, 1, 1, 10, 10, 10], ["a", 0, 1, 1, 10, 10]];
-    expect(parseCells({ cells: [...tuples, ...malformed] })).toEqual(cells);
+    expect(parseCells({ cells: [...tuples, ...malformed] })).toEqual(ok(cells));
   });
 
   it("removes duplicate row/col pairs", () => {
-    expect(parseCells({ cells: [...cells, { ...cells[0], x: 700 }] })).toEqual(cells);
+    expect(parseCells({ cells: [...cells, { ...cells[0], x: 700 }] })).toEqual(ok(cells));
   });
 
   it("rejects responses with too few cells or no cell list", () => {
-    expectAnalyzeError(() => parseCells({ cells: cells.slice(0, 7) }), 502, /för få/);
-    expectAnalyzeError(() => parseCells({}), 502);
+    expectFailure(parseCells({ cells: cells.slice(0, 7) }), 502, /för få/);
+    expectFailure(parseCells({}), 502);
+  });
+});
+
+describe("interpretReply", () => {
+  const cells = gridCells();
+  const tuples = cells.map(({ row, col, x, y, w, h }) => [row, col, x, y, w, h]);
+
+  it("returns cells from a complete reply", () => {
+    expect(interpretReply({ text: JSON.stringify({ cells: tuples }) })).toEqual(ok(cells));
+  });
+
+  it("explains truncation instead of reporting broken JSON", () => {
+    const reply = { text: '{"cells":[[0,0,', candidates: [{ finishReason: "MAX_TOKENS" }] } as never;
+    expectFailure(interpretReply(reply), 502, /för stort/);
+  });
+
+  it("reports empty and malformed replies", () => {
+    expectFailure(interpretReply({ text: "  " }), 502, /inget svar/);
+    expectFailure(interpretReply({ text: '{"cells":[' }), 502, /ofullständig/);
+  });
+});
+
+describe("describeReply", () => {
+  it("summarises the reply for logs", () => {
+    const reply = {
+      text: `{"cells":[${"x".repeat(500)}`,
+      candidates: [{ finishReason: "STOP" }],
+      usageMetadata: { candidatesTokenCount: 42 },
+    } as never;
+    const diagnostics = describeReply(reply);
+    expect(diagnostics).toMatchObject({ finishReason: "STOP", outputTokens: 42, textLength: 510 });
+    expect(diagnostics.textTail).toHaveLength(200);
   });
 });

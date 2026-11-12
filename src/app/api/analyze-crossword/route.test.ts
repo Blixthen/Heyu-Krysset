@@ -36,56 +36,24 @@ describe("POST /api/analyze-crossword", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
-  it("returns validated, de-duplicated cells", async () => {
+  it("returns cells from Gemini's reply", async () => {
     const cells = gridCells();
-    generateContent.mockResolvedValue({ text: JSON.stringify({ cells: [...cells, cells[0]] }) });
+    generateContent.mockResolvedValue({ text: JSON.stringify({ cells }) });
     const response = await analyze(validBody);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ cells });
     expect(generateContent.mock.calls[0][0].model).toBe("gemini-3-flash-preview");
   });
 
-  it("accepts compact [row, col, x, y, w, h] tuples", async () => {
-    const cells = gridCells();
-    const tuples = cells.map(({ row, col, x, y, w, h }) => [row, col, x, y, w, h]);
-    generateContent.mockResolvedValue({ text: JSON.stringify({ cells: tuples }) });
-    const response = await analyze(validBody);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ cells });
-  });
-
-  it("requests structured output with an explicit token limit", async () => {
-    generateContent.mockResolvedValue({ text: JSON.stringify({ cells: gridCells() }) });
-    await analyze(validBody);
-    const { config } = generateContent.mock.calls[0][0];
-    expect(config.responseSchema).toBeDefined();
-    expect(config.maxOutputTokens).toBeGreaterThan(0);
-  });
-
-  it("explains truncated output instead of reporting broken JSON", async () => {
-    generateContent.mockResolvedValue({
-      text: '{"cells":[[0,0,1,1,10,10],[0,1,',
-      candidates: [{ finishReason: "MAX_TOKENS" }],
-      usageMetadata: { candidatesTokenCount: 32768 },
-    });
-    const response = await analyze(validBody);
-    expect(response.status).toBe(502);
-    expect((await response.json()).error).toMatch(/för stort/);
-    expect(console.warn).toHaveBeenCalledWith(
-      "analyze-crossword rejected model output",
-      expect.stringMatching(/för stort/),
-      expect.objectContaining({ finishReason: "MAX_TOKENS", outputTokens: 32768 }),
-    );
-  });
-
-  it("logs diagnostics for rejected model output without the image", async () => {
+  it("responds with and logs rejected model output, without the image", async () => {
     generateContent.mockResolvedValue({ text: '{"cells":[', candidates: [{ finishReason: "STOP" }] });
     const response = await analyze({ image: "SECRETIMAGEDATA", mimeType: "image/png" });
+    expect(response.status).toBe(502);
     expect((await response.json()).error).toMatch(/ofullständig/);
     expect(console.warn).toHaveBeenCalledWith(
-      "analyze-crossword rejected model output",
+      "analyze-crossword: rejected model output",
       expect.any(String),
-      expect.objectContaining({ finishReason: "STOP", textLength: 10, textTail: '{"cells":[' }),
+      expect.objectContaining({ model: "gemini-3-flash-preview", finishReason: "STOP", textLength: 10, textTail: '{"cells":[' }),
     );
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("SECRETIMAGEDATA");
   });
@@ -109,18 +77,7 @@ describe("POST /api/analyze-crossword", () => {
     const body = await response.json();
     expect(body.error).toBe("Kunde inte tolka korsordet. Försök igen.");
     expect(JSON.stringify(body)).not.toContain("AIza");
-  });
-
-  it("returns our own message for bad model output", async () => {
-    generateContent.mockResolvedValue({ text: JSON.stringify({ cells: gridCells().slice(0, 3) }) });
-    const response = await analyze(validBody);
-    expect(response.status).toBe(502);
-    expect((await response.json()).error).toBe("Hittade för få bokstavsrutor i bilden.");
-  });
-
-  it("returns 502 for an empty model response", async () => {
-    generateContent.mockResolvedValue({ text: "" });
-    expect((await analyze(validBody)).status).toBe(502);
+    expect(console.error).toHaveBeenCalled();
   });
 
   it("validates the request before calling Gemini", async () => {
