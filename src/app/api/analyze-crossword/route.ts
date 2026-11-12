@@ -6,31 +6,17 @@ import {
   type AnalyzeFailure,
   type ModelReply,
 } from "@/lib/analyze";
-import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import { createGeminiClient, DEFAULT_MODEL, toModelReply } from "@/lib/gemini";
 import { NextResponse } from "next/server";
 
+/** Gemini's timeout in @/lib/gemini is set to fit inside this. */
 export const maxDuration = 60;
-
-const DEFAULT_MODEL = "gemini-3-flash-preview";
-/** Below maxDuration (60 s), leaving time to parse the reply and respond. */
-const GEMINI_TIMEOUT_MS = 55_000;
-/** No retries: a second attempt would not fit inside maxDuration. */
-const GEMINI_ATTEMPTS = 1;
 
 /** Shown for any failure whose details must stay server-side. */
 const GENERIC_FAILURE: AnalyzeFailure = { message: "Kunde inte tolka korsordet. Försök igen.", status: 502 };
 
 function failureResponse({ message, status }: AnalyzeFailure) {
   return NextResponse.json({ error: message }, { status });
-}
-
-/** Reads the SDK's `text` getter exactly once. */
-function toModelReply(response: GenerateContentResponse): ModelReply {
-  return {
-    text: response.text?.trim() ?? "",
-    finishReason: response.candidates?.[0]?.finishReason,
-    outputTokens: response.usageMetadata?.candidatesTokenCount,
-  };
 }
 
 async function readBody(request: Request): Promise<unknown> {
@@ -57,10 +43,7 @@ export async function POST(request: Request) {
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
   let reply: ModelReply;
   try {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: { apiVersion: "v1beta", timeout: GEMINI_TIMEOUT_MS, retryOptions: { attempts: GEMINI_ATTEMPTS } },
-    });
+    const ai = createGeminiClient(apiKey);
     reply = toModelReply(await ai.models.generateContent(buildGenerateRequest(model, input.value)));
   } catch (error) {
     // SDK, network and quota errors can contain internal details (keys,

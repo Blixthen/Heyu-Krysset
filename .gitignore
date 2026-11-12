@@ -20,3 +20,6 @@ out/
 .idea/
 .vscode/
 .DS_Store
+
+# photo eval output (pnpm eval)
+src/test/crosswords/overlays/

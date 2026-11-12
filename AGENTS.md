@@ -22,6 +22,8 @@ pnpm dev                          # dev server on :3000; needs .env.local (see .
 pnpm test                         # Vitest, all tests
 pnpm test src/lib/board.test.ts   # one file
 pnpm test -t "merges letters"     # tests whose name matches
+pnpm eval                         # send the photos in src/test/crosswords to real Gemini; needs GEMINI_API_KEY
+pnpm eval:record                  # same, and save each reply for the offline replay tests
 pnpm lint
 pnpm typecheck                    # next typegen, then tsc --noEmit
 pnpm preview                      # OpenNext build, run on the local Workers runtime; needs .dev.vars
@@ -67,7 +69,7 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 | A route that must work without the password | Add it to `PUBLIC_PATHS` in `src/proxy.ts`, plus a test in `src/proxy.test.ts` |
 | An environment variable | `.env.example`, the README "Deploying" section, and where it is set: GitHub Actions variables for `NEXT_PUBLIC_*` (and the build steps in both workflows), `wrangler secret put` for runtime secrets |
 | `next.config.ts`, `proxy.ts`, or Next/OpenNext/wrangler versions | `pnpm preview` and check the login gate and the home page on the Workers runtime; `next build` passing does not prove it runs there |
-| The Gemini prompt or cell parsing | `src/lib/analyze.test.ts`; Gemini output is untrusted input like any peer payload |
+| The Gemini prompt or cell parsing | `src/lib/analyze.test.ts`; Gemini output is untrusted input like any peer payload. Then run `pnpm eval:record` and commit the updated `*.reply.json` files, so the photo replay tests reflect what the model now returns |
 
 ## TypeScript conventions
 
