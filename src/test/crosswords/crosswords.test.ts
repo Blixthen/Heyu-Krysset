@@ -1,5 +1,7 @@
 import { interpretReply, parseAnalyzeRequest } from "@/lib/analyze";
+import { classifySquares, findGrid, toLetterCells } from "@/lib/gridImage";
 import { gridCells } from "@/test/fixtures";
+import jpeg from "jpeg-js";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { jpegSize } from "./overlay";
@@ -81,6 +83,14 @@ describe.each(CROSSWORD_PHOTOS)("crossword photo $name ($description)", (crosswo
   it("is accepted as an upload", () => {
     const input = parseAnalyzeRequest({ image: readPhotoBase64(crossword), mimeType: "image/jpeg" });
     expect(input.ok).toBe(true);
+  });
+
+  it("is read by the image reading with no problems", () => {
+    const pixels = jpeg.decode(readFileSync(photoPath(crossword)), { useTArray: true });
+    const grid = findGrid(pixels);
+    expect(grid, "no grid found").not.toBeNull();
+    if (!grid) return;
+    expect(findProblems(crossword, toLetterCells(pixels, grid, classifySquares(pixels, grid)))).toEqual([]);
   });
 
   it("replays its recorded Gemini reply into exactly its known problems", () => {
