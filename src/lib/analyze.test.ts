@@ -1,4 +1,5 @@
 import { gridCells } from "@/test/fixtures";
+import { FinishReason } from "@google/genai";
 import { describe, expect, it } from "vitest";
 import {
   buildGenerateRequest,
@@ -6,6 +7,7 @@ import {
   extractJsonObject,
   interpretReply,
   MAX_IMAGE_BASE64_LENGTH,
+  ok,
   parseAnalyzeRequest,
   parseCells,
   stripDataUrl,
@@ -18,8 +20,6 @@ function expectFailure(result: Result<unknown>, status: number, message?: RegExp
   expect(result.error.status).toBe(status);
   if (message) expect(result.error.message).toMatch(message);
 }
-
-const ok = <T>(value: T) => ({ ok: true, value });
 
 describe("stripDataUrl", () => {
   it("removes a data URL prefix", () => {
@@ -113,29 +113,29 @@ describe("interpretReply", () => {
   const tuples = cells.map(({ row, col, x, y, w, h }) => [row, col, x, y, w, h]);
 
   it("returns cells from a complete reply", () => {
-    expect(interpretReply({ text: JSON.stringify({ cells: tuples }) })).toEqual(ok(cells));
+    const reply = { text: JSON.stringify({ cells: tuples }), finishReason: FinishReason.STOP };
+    expect(interpretReply(reply)).toEqual(ok(cells));
   });
 
   it("explains truncation instead of reporting broken JSON", () => {
-    const reply = { text: '{"cells":[[0,0,', candidates: [{ finishReason: "MAX_TOKENS" }] } as never;
+    const reply = { text: '{"cells":[[0,0,', finishReason: FinishReason.MAX_TOKENS };
     expectFailure(interpretReply(reply), 502, /för stort/);
   });
 
   it("reports empty and malformed replies", () => {
-    expectFailure(interpretReply({ text: "  " }), 502, /inget svar/);
+    expectFailure(interpretReply({ text: "" }), 502, /inget svar/);
     expectFailure(interpretReply({ text: '{"cells":[' }), 502, /ofullständig/);
   });
 });
 
 describe("describeReply", () => {
   it("summarises the reply for logs", () => {
-    const reply = {
-      text: `{"cells":[${"x".repeat(500)}`,
-      candidates: [{ finishReason: "STOP" }],
-      usageMetadata: { candidatesTokenCount: 42 },
-    } as never;
-    const diagnostics = describeReply(reply);
-    expect(diagnostics).toMatchObject({ finishReason: "STOP", outputTokens: 42, textLength: 510 });
-    expect(diagnostics.textTail).toHaveLength(200);
+    const reply = { text: `{"cells":[${"x".repeat(500)}`, finishReason: FinishReason.STOP, outputTokens: 42 };
+    expect(describeReply(reply)).toEqual({
+      finishReason: FinishReason.STOP,
+      outputTokens: 42,
+      textLength: 510,
+      textTail: "x".repeat(200),
+    });
   });
 });

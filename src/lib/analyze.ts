@@ -1,4 +1,4 @@
-import { FinishReason, Type, type GenerateContentParameters, type GenerateContentResponse, type Schema } from "@google/genai";
+import { FinishReason, Type, type GenerateContentParameters, type Schema } from "@google/genai";
 import { dedupeCells, isLetterCell, MAX_CELLS, MIN_CELLS, type LetterCell } from "./crossword";
 
 /**
@@ -12,16 +12,15 @@ export type AnalyzeFailure = { message: string; status: number };
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: AnalyzeFailure };
 
-const ok = <T>(value: T): Result<T> => ({ ok: true, value });
-const fail = (message: string, status = 502): { ok: false; error: AnalyzeFailure } => ({
-  ok: false,
-  error: { message, status },
-});
+export type Failure = Extract<Result<never>, { ok: false }>;
+
+export const ok = <T>(value: T): Result<T> => ({ ok: true, value });
+export const fail = (message: string, status = 502): Failure => ({ ok: false, error: { message, status } });
 
 export type AnalyzeInput = { image: string; mimeType: string };
 
 /** Max output tokens: MAX_CELLS (2000) tuples at ~15 tokens each fit with headroom. */
-export const MAX_OUTPUT_TOKENS = 32_768;
+const MAX_OUTPUT_TOKENS = 32_768;
 /** Enough of a reply's end to see where it stopped, short enough for a log line. */
 const LOG_TAIL_LENGTH = 200;
 
@@ -164,34 +163,36 @@ export function parseCells(value: unknown): Result<LetterCell[]> {
   return ok(cells);
 }
 
-/** The parts of a Gemini response we read. */
-export type ModelReply = Pick<GenerateContentResponse, "text" | "candidates" | "usageMetadata">;
+/**
+ * The parts of a Gemini response we use, as plain data. The shell builds it
+ * once, so the SDK's `text` getter (which concatenates parts and can warn) runs once.
+ * `text` is already trimmed, so interpretation and diagnostics see the same string.
+ */
+export type ModelReply = { text: string; finishReason?: FinishReason; outputTokens?: number };
 
 /** What we know about a reply, for logging. Never includes the image. */
 export type ModelDiagnostics = {
   finishReason?: string;
   outputTokens?: number;
   textLength: number;
-  textTail?: string;
+  textTail: string;
 };
 
 export function describeReply(reply: ModelReply): ModelDiagnostics {
-  const text = reply.text;
   return {
-    finishReason: reply.candidates?.[0]?.finishReason,
-    outputTokens: reply.usageMetadata?.candidatesTokenCount,
-    textLength: text?.length ?? 0,
-    textTail: text?.slice(-LOG_TAIL_LENGTH),
+    finishReason: reply.finishReason,
+    outputTokens: reply.outputTokens,
+    textLength: reply.text.length,
+    textTail: reply.text.slice(-LOG_TAIL_LENGTH),
   };
 }
 
 /** Turns a Gemini reply into letter cells, or a user-facing failure. */
 export function interpretReply(reply: ModelReply): Result<LetterCell[]> {
-  if (reply.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS) {
+  if (reply.finishReason === FinishReason.MAX_TOKENS) {
     return fail("Korsordet var för stort för att tolkas. Prova att fotografera en del i taget.");
   }
-  const text = reply.text?.trim();
-  if (!text) return fail("Gemini returnerade inget svar.");
-  const json = extractJsonObject(text);
+  if (!reply.text) return fail("Gemini returnerade inget svar.");
+  const json = extractJsonObject(reply.text);
   return json.ok ? parseCells(json.value) : json;
 }
