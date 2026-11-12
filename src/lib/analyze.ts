@@ -1,3 +1,4 @@
+import { Type, type Schema } from "@google/genai";
 import { dedupeCells, isLetterCell, MAX_CELLS, MIN_CELLS, type LetterCell } from "./crossword";
 
 /** An error whose message is safe to show to the user. */
@@ -26,12 +27,28 @@ Classify each area before you answer:
 - block: solid black, dark gray, or a blocked square with no letter.
 - image: a photograph or illustration used as a picture clue. It belongs in the puzzle. Never treat it as a block or as a letter square.
 
-Return JSON only, and only the empty squares:
-{"cells":[{"row":0,"col":0,"type":"empty","x":0,"y":0,"w":0,"h":0}]}
-x,y is the top-left. w,h is the size. All four numbers are integers from 0 to 1000, relative to the full image.
+Return JSON only, and only the empty squares. Each square is an array of six integers [row, col, x, y, w, h]:
+{"cells":[[0,0,120,80,30,30],[0,1,150,80,30,30]]}
+x,y is the top-left. w,h is the size. x, y, w and h are integers from 0 to 1000, relative to the full image.
 Scan from the top edge to the bottom edge and from left to right. Do not stop after the first rows.
 row increases downward and col increases to the right, counting only letter squares.
 Do not return clue, block, or image cells.`;
+
+/**
+ * Structured-output schema matching ANALYZE_PROMPT. Cells are compact
+ * [row, col, x, y, w, h] tuples: a large bildkorsord has hundreds of squares,
+ * and keyed objects used to push the reply past the output-token limit.
+ */
+export const ANALYZE_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    cells: {
+      type: Type.ARRAY,
+      items: { type: Type.ARRAY, items: { type: Type.INTEGER }, minItems: "6", maxItems: "6" },
+    },
+  },
+  required: ["cells"],
+};
 
 const MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -94,13 +111,21 @@ function isEmptyType(value: unknown) {
   return type === undefined || type === "empty";
 }
 
+/** Accepts a [row, col, x, y, w, h] tuple or a keyed cell object. */
+function toCellCandidate(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  if (value.length !== 6) return null;
+  const [row, col, x, y, w, h] = value as unknown[];
+  return { row, col, x, y, w, h };
+}
+
 /** Turns Gemini's JSON into validated, de-duplicated letter cells. */
 export function parseCells(value: unknown): LetterCell[] {
   if (!value || typeof value !== "object" || !Array.isArray((value as { cells?: unknown }).cells)) {
     throw new AnalyzeError("Gemini returnerade inga rutor.");
   }
   const raw = (value as { cells: unknown[] }).cells;
-  const cells = dedupeCells(raw.filter(isEmptyType).filter(isLetterCell));
+  const cells = dedupeCells(raw.map(toCellCandidate).filter(isEmptyType).filter(isLetterCell));
   if (cells.length < MIN_CELLS) throw new AnalyzeError("Hittade för få bokstavsrutor i bilden.");
   if (cells.length > MAX_CELLS) throw new AnalyzeError("Hittade orimligt många rutor i bilden.");
   return cells;

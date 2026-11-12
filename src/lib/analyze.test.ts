@@ -74,6 +74,12 @@ describe("parseCells", () => {
     expect(parseCells({ cells: noisy })).toEqual(cells);
   });
 
+  it("accepts [row, col, x, y, w, h] tuples and drops malformed ones", () => {
+    const tuples = cells.map(({ row, col, x, y, w, h }) => [row, col, x, y, w, h]);
+    const malformed = [[9, 9, 1, 1, 10], [9, 9, 1, 1, 10, 10, 10], ["a", 0, 1, 1, 10, 10]];
+    expect(parseCells({ cells: [...tuples, ...malformed] })).toEqual(cells);
+  });
+
   it("removes duplicate row/col pairs", () => {
     expect(parseCells({ cells: [...cells, { ...cells[0], x: 700 }] })).toEqual(cells);
   });
