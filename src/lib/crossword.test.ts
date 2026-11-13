@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   adjacentCell,
   chooseDirection,
+  toggleDirection,
   dedupeCells,
   findNeighbor,
   isCellUpdate,
@@ -158,6 +159,19 @@ describe("words", () => {
     expect(adjacentCell(cells, at(0, 0), 1, 0)).toBe(at(1, 0));
     expect(findNeighbor(cells, at(0, 1), 1, 0)).toBe(at(3, 1));
     expect(adjacentCell(cells, at(0, 1), 1, 0)).toBeNull();
+  });
+
+  it("treats boxes drawn tighter than the grid as neighbours, but not across a clue square", () => {
+    // 30-unit boxes on a 50-unit pitch, as Gemini sometimes draws them; column 2 is a clue square.
+    const tight = [0, 1, 3].map((col) => ({ row: 0, col, x: 100 + col * 50, y: 100, w: 30, h: 30 }));
+    expect(adjacentCell(tight, tight[0], 0, 1)).toBe(tight[1]);
+    expect(adjacentCell(tight, tight[1], 0, 1)).toBeNull();
+  });
+
+  it("switches direction on a second tap only where a word runs the other way", () => {
+    expect(toggleDirection(cells, at(0, 0), "across")).toBe("down");
+    expect(toggleDirection(cells, at(0, 0), "down")).toBe("across");
+    expect(toggleDirection(cells, at(1, 0), "down")).toBe("down");
   });
 
   it("chooses the direction a word runs through the selected cell", () => {

@@ -100,6 +100,24 @@ describe("CrosswordGrid", () => {
     expect(document.activeElement).toBe(cell(2, 1));
   });
 
+  it("does not switch direction after a cancelled tap", () => {
+    render(<Harness />);
+    cell(1, 1).focus();
+    fireEvent.pointerDown(cell(1, 1));
+    fireEvent.pointerCancel(cell(1, 1));
+    fireEvent.click(cell(1, 1));
+    fireEvent.change(cell(1, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(1, 2));
+  });
+
+  it("keeps the word's direction when an arrow key hits the edge", () => {
+    render(<Harness puzzle={withClues} />);
+    cell(1, 0).focus();
+    fireEvent.keyDown(cell(1, 0), { key: "ArrowLeft" });
+    fireEvent.change(cell(1, 0), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(2, 0));
+  });
+
   it("does not switch direction on the first tap", () => {
     render(<Harness />);
     fireEvent.pointerDown(cell(1, 1));

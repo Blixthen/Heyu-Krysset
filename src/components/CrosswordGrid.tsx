@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  adjacentCell,
   cellKey,
   chooseDirection,
   findNeighbor,
-  hasWord,
+  nextInWord,
   oneLetter,
+  toggleDirection,
   wordCells,
   type CellPosition,
   type CrosswordPuzzle,
@@ -14,7 +14,7 @@ import {
   type LetterCell,
   type Letters,
 } from "@/lib/crossword";
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 const ARROWS: Record<string, { direction: Direction; rowStep: -1 | 0 | 1; colStep: -1 | 0 | 1 }> = {
   ArrowRight: { direction: "across", rowStep: 0, colStep: 1 },
@@ -63,16 +63,9 @@ export function CrosswordGrid({
     return next;
   }
 
-  /** Arrow keys roam the whole grid, jumping over clue squares. */
-  function move(from: LetterCell, rowStep: -1 | 0 | 1, colStep: -1 | 0 | 1) {
-    const next = findNeighbor(puzzle.cells, from, rowStep, colStep);
-    return next ? select(next) : null;
-  }
-
   /** Typing stays within the word, so finishing one doesn't jump into another. */
   function step(from: LetterCell, sign: -1 | 1) {
-    const next =
-      directionRef.current === "across" ? adjacentCell(puzzle.cells, from, 0, sign) : adjacentCell(puzzle.cells, from, sign, 0);
+    const next = nextInWord(puzzle.cells, from, directionRef.current, sign);
     return next ? select(next) : null;
   }
 
@@ -84,15 +77,24 @@ export function CrosswordGrid({
     return step(cell, -1);
   }
 
-  const selected = selectedCell && puzzle.cells.find((cell) => cell.row === selectedCell.row && cell.col === selectedCell.col);
-  const activeWord = new Set(selected ? wordCells(puzzle.cells, selected, direction).map((cell) => cellKey(cell.row, cell.col)) : []);
+  // Walking a word scans every cell per step, so it isn't redone for each peer's letter.
+  const selectedRow = selectedCell?.row;
+  const selectedCol = selectedCell?.col;
+  const activeWord = useMemo(() => {
+    const selected = puzzle.cells.find((cell) => cell.row === selectedRow && cell.col === selectedCol);
+    return new Set(selected ? wordCells(puzzle.cells, selected, direction).map((cell) => cellKey(cell.row, cell.col)) : []);
+  }, [puzzle.cells, selectedRow, selectedCol, direction]);
 
   function onKeyDown(cell: LetterCell, letter: string, event: KeyboardEvent<HTMLInputElement>) {
     const arrow = ARROWS[event.key];
     if (arrow) {
       event.preventDefault();
+      // Arrow keys roam the whole grid, jumping over clue squares. At the
+      // edge nothing moves, so the direction stays with the current word.
+      const next = findNeighbor(puzzle.cells, cell, arrow.rowStep, arrow.colStep);
+      if (!next) return;
       setDirection(arrow.direction);
-      move(cell, arrow.rowStep, arrow.colStep);
+      select(next);
       return;
     }
     // Backspace in an empty cell steps back and clears the previous one.
@@ -128,9 +130,11 @@ export function CrosswordGrid({
               onPointerDown={(event) => {
                 wasFocused.current = document.activeElement === event.currentTarget;
               }}
+              onPointerCancel={() => {
+                wasFocused.current = false;
+              }}
               onClick={() => {
-                const other = directionRef.current === "across" ? "down" : "across";
-                if (wasFocused.current && hasWord(puzzle.cells, cell, other)) setDirection(other);
+                if (wasFocused.current) setDirection(toggleDirection(puzzle.cells, cell, directionRef.current));
                 wasFocused.current = false;
               }}
               onFocus={(event) => {

@@ -151,33 +151,38 @@ export function isCellUpdate(value: unknown): value is CellUpdate {
 export type Direction = "across" | "down";
 
 /**
- * How far apart (in cell sizes, centre to centre) two cells may be and still
- * be neighbours in a word: grid lines and photo skew leave small gaps, while
- * a clue square in between puts the next cell two sizes away.
+ * The widest empty gap (in cell sizes, edge to edge) between two cells of the
+ * same word. Neighbours share a grid line, or sit a little apart when boxes
+ * are drawn tighter than the grid, while a clue square in between leaves a
+ * gap of about a whole cell.
  */
-const MAX_WORD_STEP = 1.5;
-/** How far off the line (in cell sizes) a neighbour in the same word may sit. */
+const MAX_WORD_GAP = 0.75;
+/** How far off the line (in cell sizes, centre to centre) a neighbour in the same word may sit. */
 const MAX_WORD_DRIFT = 0.5;
-
-type Step = { rowStep: -1 | 0 | 1; colStep: -1 | 0 | 1 };
-const FORWARD: Record<Direction, Step> = { across: { rowStep: 0, colStep: 1 }, down: { rowStep: 1, colStep: 0 } };
-const BACKWARD: Record<Direction, Step> = { across: { rowStep: 0, colStep: -1 }, down: { rowStep: -1, colStep: 0 } };
-
-const nextInWord = (cells: LetterCell[], from: LetterCell, step: Step) =>
-  adjacentCell(cells, from, step.rowStep, step.colStep);
 
 /** The cell right next to `from` in a direction, or null if a clue square, picture or edge comes first. */
 export function adjacentCell(cells: LetterCell[], from: LetterCell, rowStep: -1 | 0 | 1, colStep: -1 | 0 | 1) {
   const next = findNeighbor(cells, from, rowStep, colStep);
   if (!next) return null;
-  const along = Math.abs(colStep !== 0 ? next.x - from.x : next.y - from.y) / (colStep !== 0 ? from.w : from.h);
-  const drift = Math.abs(colStep !== 0 ? next.y - from.y : next.x - from.x) / (colStep !== 0 ? from.h : from.w);
-  return along <= MAX_WORD_STEP && drift <= MAX_WORD_DRIFT ? next : null;
+  const dx = Math.abs(next.x + next.w / 2 - (from.x + from.w / 2));
+  const dy = Math.abs(next.y + next.h / 2 - (from.y + from.h / 2));
+  const gap = colStep !== 0 ? (dx - (from.w + next.w) / 2) / from.w : (dy - (from.h + next.h) / 2) / from.h;
+  const drift = colStep !== 0 ? dy / from.h : dx / from.w;
+  return gap <= MAX_WORD_GAP && drift <= MAX_WORD_DRIFT ? next : null;
+}
+
+/** The next (sign 1) or previous (sign -1) cell of the word through `from`, or null at the word's end. */
+export function nextInWord(cells: LetterCell[], from: LetterCell, direction: Direction, sign: -1 | 1) {
+  return direction === "across" ? adjacentCell(cells, from, 0, sign) : adjacentCell(cells, from, sign, 0);
+}
+
+export function otherDirection(direction: Direction): Direction {
+  return direction === "across" ? "down" : "across";
 }
 
 /** Whether a word of two or more letters runs through the cell in a direction. */
 export function hasWord(cells: LetterCell[], cell: LetterCell, direction: Direction) {
-  return nextInWord(cells, cell, FORWARD[direction]) !== null || nextInWord(cells, cell, BACKWARD[direction]) !== null;
+  return nextInWord(cells, cell, direction, 1) !== null || nextInWord(cells, cell, direction, -1) !== null;
 }
 
 /**
@@ -187,7 +192,12 @@ export function hasWord(cells: LetterCell[], cell: LetterCell, direction: Direct
  */
 export function chooseDirection(cells: LetterCell[], cell: LetterCell, current: Direction): Direction {
   if (hasWord(cells, cell, current)) return current;
-  const other = current === "across" ? "down" : "across";
+  return toggleDirection(cells, cell, current);
+}
+
+/** The direction after tapping the selected cell again: the other way, if a word runs that way. */
+export function toggleDirection(cells: LetterCell[], cell: LetterCell, current: Direction): Direction {
+  const other = otherDirection(current);
   return hasWord(cells, cell, other) ? other : current;
 }
 
@@ -196,13 +206,13 @@ export function wordCells(cells: LetterCell[], cell: LetterCell, direction: Dire
   const word = [cell];
   // Bounded by the cell count, so a malformed peer grid can't loop forever.
   for (let at = cell; word.length <= cells.length; ) {
-    const before = nextInWord(cells, at, BACKWARD[direction]);
+    const before = nextInWord(cells, at, direction, -1);
     if (!before || word.includes(before)) break;
     word.unshift(before);
     at = before;
   }
   for (let at = cell; word.length <= cells.length; ) {
-    const after = nextInWord(cells, at, FORWARD[direction]);
+    const after = nextInWord(cells, at, direction, 1);
     if (!after || word.includes(after)) break;
     word.push(after);
     at = after;
