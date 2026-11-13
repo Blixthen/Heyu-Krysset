@@ -22,6 +22,7 @@ vi.mock("@/lib/supabase", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 const { useCrosswordRoom } = await import("./useCrosswordRoom");
+const { hasReacted } = await import("@/lib/reactions");
 
 const TOPIC = "crossword-secret";
 
@@ -200,6 +201,38 @@ describe("useCrosswordRoom", () => {
       await act(() => room.result.current.sendMessage("Hej"));
       expect(room.result.current.messages[0].failed).toBe(true);
       expect(room.result.current.sendError).toBe("Inte ansluten till kanalen ännu.");
+    });
+  });
+
+  describe("reactions", () => {
+    const peerReaction = { messageId: "m1", emoji: "👍", senderId: "peer", nickname: "Peer", on: true };
+
+    it("applies a peer's reaction and drops invalid ones", async () => {
+      const room = await goLive();
+      act(() => room.channel().receive("reaction", { ...peerReaction, extra: "x" }));
+      act(() => room.channel().receive("reaction", { ...peerReaction, emoji: "💩" }));
+      expect(hasReacted(room.result.current.reactions, "m1", "👍", "peer")).toBe(true);
+      expect(room.result.current.reactions.get("m1")?.size).toBe(1);
+    });
+
+    it("sends our reaction, and takes it back on a second tap", async () => {
+      const room = await goLive();
+      const clientId = room.result.current.clientId;
+      await act(() => room.result.current.react("m1", "🎉"));
+      expect(hasReacted(room.result.current.reactions, "m1", "🎉", clientId)).toBe(true);
+      await act(() => room.result.current.react("m1", "🎉"));
+      expect(hasReacted(room.result.current.reactions, "m1", "🎉", clientId)).toBe(false);
+      expect(room.channel().sentEvents("reaction")).toEqual([
+        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: true },
+        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: false },
+      ]);
+    });
+
+    it("takes back a reaction that could not be sent", async () => {
+      const room = await goLive();
+      room.channel().sendResult = "error";
+      await act(() => room.result.current.react("m1", "🎉"));
+      expect(room.result.current.reactions.size).toBe(0);
     });
   });
 

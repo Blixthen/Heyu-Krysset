@@ -2,7 +2,8 @@
 
 import type { DisplayMessage, RoomStatus } from "@/hooks/useCrosswordRoom";
 import { formatTime, MAX_MESSAGE_LENGTH } from "@/lib/chat";
-import { ChevronDown, ChevronUp, Send } from "lucide-react";
+import { REACTION_EMOJI, reactionChips, type ReactionEmoji, type Reactions } from "@/lib/reactions";
+import { ChevronDown, ChevronUp, Send, SmilePlus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 const STATUS_LABELS: Record<RoomStatus, string> = {
@@ -25,7 +26,9 @@ export function ChatPanel({
   connectionError,
   sendError,
   messages,
+  reactions = new Map(),
   onSend,
+  onReact,
   onReconnect,
   open = true,
   unread = 0,
@@ -36,7 +39,10 @@ export function ChatPanel({
   connectionError: string;
   sendError: string;
   messages: DisplayMessage[];
+  reactions?: Reactions;
   onSend: (text: string) => void;
+  /** Adds our reaction, or removes it if we already reacted with that emoji. */
+  onReact?: (messageId: string, emoji: ReactionEmoji) => void;
   onReconnect: () => void;
   /** On phones, whether the chat is unfolded; wide screens always show it. */
   open?: boolean;
@@ -44,6 +50,8 @@ export function ChatPanel({
   onToggle?: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  // The message whose emoji picker is open, if any.
+  const [picking, setPicking] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // A folded list has no height, so scroll again once it opens.
@@ -113,6 +121,13 @@ export function ChatPanel({
           ) : (
             messages.map((message) => {
               const mine = message.senderId === clientId;
+              // A message that failed to send never reached anyone, so there is nothing to react to.
+              const canReact = onReact !== undefined && !message.failed;
+              const chips = reactionChips(reactions, message.id, clientId);
+              const react = (emoji: ReactionEmoji) => {
+                setPicking(null);
+                onReact?.(message.id, emoji);
+              };
               return (
                 <article
                   key={message.id}
@@ -122,9 +137,59 @@ export function ChatPanel({
                 >
                   <div className="mb-1 flex items-center justify-between gap-3 text-[11px] opacity-80">
                     <span className="font-medium">{message.nickname}</span>
-                    <time dateTime={message.sentAt}>{formatTime(message.sentAt)}</time>
+                    <span className="flex items-center gap-1">
+                      <time dateTime={message.sentAt}>{formatTime(message.sentAt)}</time>
+                      {canReact ? (
+                        <button
+                          type="button"
+                          onClick={() => setPicking(picking === message.id ? null : message.id)}
+                          aria-label={`Reagera på ${message.nickname}s meddelande`}
+                          aria-expanded={picking === message.id}
+                          className="-my-1 flex size-7 items-center justify-center rounded-full hover:bg-black/15"
+                        >
+                          <SmilePlus aria-hidden className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </span>
                   </div>
                   <p className="text-sm leading-5 break-words">{message.text}</p>
+                  {picking === message.id && canReact ? (
+                    <div role="group" aria-label="Välj reaktion" className="mt-2 flex flex-wrap gap-1">
+                      {REACTION_EMOJI.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => react(emoji)}
+                          aria-label={`Reagera med ${emoji}`}
+                          className="flex size-9 items-center justify-center rounded-full bg-black/15 text-lg hover:bg-black/25"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {chips.length > 0 ? (
+                    <ul aria-label="Reaktioner" className="mt-2 flex flex-wrap gap-1">
+                      {chips.map((chip) => (
+                        <li key={chip.emoji}>
+                          <button
+                            type="button"
+                            disabled={!canReact}
+                            onClick={() => react(chip.emoji)}
+                            aria-pressed={chip.mine}
+                            aria-label={`${chip.emoji} ${chip.count}: ${chip.names.join(", ")}`}
+                            title={chip.names.join(", ")}
+                            className={`flex min-h-7 items-center gap-1 rounded-full px-2 text-xs font-semibold ${
+                              chip.mine ? "bg-black/25 ring-1 ring-current" : "bg-black/15"
+                            }`}
+                          >
+                            <span aria-hidden>{chip.emoji}</span>
+                            <span aria-hidden>{chip.count}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {message.failed ? <p className="mt-1 text-[11px] font-semibold">Skickades inte</p> : null}
                 </article>
               );

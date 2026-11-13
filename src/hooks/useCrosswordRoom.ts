@@ -15,6 +15,7 @@ import {
   type Letters,
 } from "@/lib/crossword";
 import { isPlayerName } from "@/lib/players";
+import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
@@ -29,6 +30,7 @@ export type DisplayMessage = ChatMessage & { failed?: boolean };
  * - "puzzle":       { puzzle, letters, authors }, the sender's full board
  * - "cell-update":  a CellUpdate for one letter and who typed it
  * - "sync-request": sent by a client that just (re)joined; one peer answers with "puzzle"
+ * - "reaction":     a Reaction, one player adding or removing an emoji on a message
  */
 const MAX_RETRIES = 4;
 const SYNC_JITTER_MS = [50, 400] as const;
@@ -63,6 +65,7 @@ export function useCrosswordRoom(nickname: string) {
   const [sendError, setSendError] = useState("");
   const [shareError, setShareError] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [reactions, setReactions] = useState<Reactions>(() => new Map());
   const [board, dispatch] = useReducer(boardReducer, emptyBoard);
   const [generation, setGeneration] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -146,6 +149,11 @@ export function useCrosswordRoom(nickname: string) {
         .on("broadcast", { event: "message" }, ({ payload }) => {
           if (!isChatMessage(payload)) return;
           setMessages((list) => appendMessage(list, toChatMessage(payload)));
+        })
+        .on("broadcast", { event: "reaction" }, ({ payload }) => {
+          if (!isReaction(payload)) return;
+          const reaction = toReaction(payload);
+          setReactions((current) => applyReaction(current, reaction));
         })
         .on("broadcast", { event: "puzzle" }, ({ payload }) => {
           const candidate = (payload as { puzzle?: unknown } | null)?.puzzle;
@@ -246,6 +254,17 @@ export function useCrosswordRoom(nickname: string) {
     [clientId, nickname],
   );
 
+  const react = useCallback(
+    async (messageId: string, emoji: ReactionEmoji) => {
+      const reaction: Reaction = { messageId, emoji, senderId: clientId, nickname, on: !hasReacted(reactions, messageId, emoji, clientId) };
+      setReactions((current) => applyReaction(current, reaction));
+      const result = await channelRef.current?.send({ type: "broadcast", event: "reaction", payload: reaction });
+      // Nobody else saw it, so take it back rather than show a reaction only we have.
+      if (result !== "ok") setReactions((current) => applyReaction(current, { ...reaction, on: !reaction.on }));
+    },
+    [clientId, nickname, reactions],
+  );
+
   const publishPuzzle = useCallback(
     (puzzle: CrosswordPuzzle) => {
       dispatch({ type: "load", puzzle });
@@ -283,6 +302,8 @@ export function useCrosswordRoom(nickname: string) {
     sendError,
     shareError,
     messages,
+    reactions,
+    react,
     board,
     reconnect,
     sendMessage,

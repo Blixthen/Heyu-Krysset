@@ -17,6 +17,8 @@ function roomState(overrides: object = {}) {
     sendError: "",
     shareError: "",
     messages: [],
+    reactions: new Map(),
+    react: vi.fn(),
     board: emptyBoard,
     reconnect: vi.fn(),
     sendMessage: vi.fn(),
