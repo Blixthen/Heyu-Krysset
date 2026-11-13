@@ -70,6 +70,7 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 | An environment variable | `.env.example`, the README "Deploying" section, and where it is set: GitHub Actions variables for `NEXT_PUBLIC_*` (and the build steps in both workflows), `wrangler secret put` for runtime secrets |
 | `next.config.ts`, `proxy.ts`, or Next/OpenNext/wrangler versions | `pnpm preview` and check the login gate and the home page on the Workers runtime; `next build` passing does not prove it runs there |
 | The Gemini prompt or cell parsing | `src/lib/analyze.test.ts`; Gemini output is untrusted input like any peer payload. Then run `pnpm eval:record` and commit the updated `*.reply.json` files, so the photo replay tests reflect what the model now returns |
+| Grid detection (`src/lib/gridImage.ts`) | Run `pnpm test`: `src/lib/gridImage.test.ts` covers each rule on synthetic pages, and the photo tests in `src/test/crosswords/` must still find every labelled square. Check new thresholds against the overlays, not just the labelled points |
 
 ## TypeScript conventions
 
