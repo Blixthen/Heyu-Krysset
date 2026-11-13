@@ -1,21 +1,43 @@
 "use client";
 
-import { dedupeCells, isLetterCell, MIN_CELLS, type CrosswordPuzzle } from "@/lib/crossword";
+import { dedupeCells, isLetterCell, MIN_CELLS, type CrosswordPuzzle, type LetterCell } from "@/lib/crossword";
+import { readGrid } from "@/lib/gridImage";
 import { prepareImages } from "@/lib/image";
 import { Camera, ImagePlus, Loader2 } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
 class UploadError extends Error {}
 
-/** Sends a photo to Gemini and returns a puzzle ready to share. */
+type PreparedImages = Awaited<ReturnType<typeof prepareImages>>;
+
+/**
+ * Reads the grid from the photo's pixels in the browser, and asks Gemini only
+ * when that finds no usable grid. Returns a puzzle ready to share.
+ */
 export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
-  let images: Awaited<ReturnType<typeof prepareImages>>;
+  let images: PreparedImages;
   try {
     images = await prepareImages(file);
   } catch {
     throw new UploadError("Kunde inte läsa bilden. Prova en JPEG- eller PNG-bild.");
   }
+  const cells = readLocally(images) ?? (await askGemini(images));
+  return { id: crypto.randomUUID(), createdAt: Date.now(), image: images.shareDataUrl, cells };
+}
 
+function readLocally(images: PreparedImages) {
+  try {
+    const cells = readGrid(images.pixels);
+    if (!cells) console.info("No grid found in the photo; asking Gemini.");
+    return cells;
+  } catch (error) {
+    // A bug in the grid reading shouldn't stop the upload while Gemini can still read it.
+    console.error(error);
+    return null;
+  }
+}
+
+async function askGemini(images: PreparedImages): Promise<LetterCell[]> {
   let response: Response;
   try {
     response = await fetch("/api/analyze-crossword", {
@@ -32,7 +54,7 @@ export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
   const data: unknown = await response.json().catch(() => null);
   const cells = (data as { cells?: unknown } | null)?.cells;
   if (response.ok && Array.isArray(cells) && cells.length >= MIN_CELLS && cells.every(isLetterCell)) {
-    return { id: crypto.randomUUID(), createdAt: Date.now(), image: images.shareDataUrl, cells: dedupeCells(cells) };
+    return dedupeCells(cells);
   }
   const error = (data as { error?: unknown } | null)?.error;
   throw new UploadError(typeof error === "string" ? error : "Kunde inte tolka bilden.");
@@ -97,7 +119,7 @@ export function PuzzleUploader({
       <h2 className="text-2xl font-semibold tracking-tight text-slate-50">Här hamnar korsordet</h2>
       <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">
         {isAnalyzing
-          ? "Gemini läser av rutnätet. Det tar en liten stund."
+          ? "Läser av rutnätet. Det tar en liten stund."
           : "Fota korsordet eller ladda upp en skärmdump. Bilden blir kvar, och ni skriver i rutorna."}
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

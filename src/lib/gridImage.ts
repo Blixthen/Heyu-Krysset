@@ -1,4 +1,4 @@
-import type { LetterCell } from "./crossword";
+import { dedupeCells, isLetterCell, MAX_CELLS, MIN_CELLS, type LetterCell } from "./crossword";
 
 /**
  * Finds a bildkorsord's grid in the photo's pixels with classic image
@@ -428,4 +428,16 @@ export function toLetterCells(pixels: Pixels, grid: Grid, squares: Square[]): Le
       const h = Math.round(grid.rows.lines[square.row + 1] * sy) - y;
       return { row: square.row, col: square.col, x, y, w, h };
     });
+}
+
+/**
+ * The whole reading: letter cells ready for a puzzle, or null when the photo
+ * doesn't read as a usable grid (then the caller asks Gemini instead). Cells
+ * pass the same validation as Gemini's, so either source yields the same shape.
+ */
+export function readGrid(pixels: Pixels): LetterCell[] | null {
+  const grid = findGrid(pixels);
+  if (!grid) return null;
+  const cells = dedupeCells(toLetterCells(pixels, grid, classifySquares(pixels, grid)).filter(isLetterCell));
+  return cells.length >= MIN_CELLS && cells.length <= MAX_CELLS ? cells : null;
 }
