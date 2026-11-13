@@ -15,9 +15,10 @@ export type Pixels = { width: number; height: number; data: Uint8Array | Uint8Cl
  * Grid line positions (px) along one axis, first to last; square i lies
  * between lines[i] and lines[i + 1]. Each line sits on the detected line
  * nearest the fitted lattice, so small irregularities in a photo don't add
- * up across the page.
+ * up across the page. `cut` says whether the first and last line are not
+ * printed but stand for the photo's edge, which cut that row or column off.
  */
-export type Lattice = { step: number; lines: number[] };
+export type Lattice = { step: number; lines: number[]; cut: { first: boolean; last: boolean } };
 export type Grid = { columns: Lattice; rows: Lattice };
 
 export type SquareKind = "letter" | "other";
@@ -90,7 +91,11 @@ const MAX_LETTER_DIMMING = 25;
 const MIN_LETTER_TINT = 0.05;
 /** …is this even (standard deviation of luminance), which rules out photographs. */
 const MAX_LETTER_SPREAD = 22;
-/** …and has printed borders on at least this many sides; a white area of a picture has none. */
+/**
+ * …and has printed borders on at least this many sides; a white area of a
+ * picture has none. A side the photo's edge cut off stands in for at most
+ * one of them, so a cut-off corner square still needs its two inner sides.
+ */
 const MIN_BORDERED_SIDES = 3;
 /** How far (px) from the lattice line to look for a square's printed border. */
 const BORDER_REACH = 4;
@@ -253,12 +258,12 @@ function fitLattice(
   while (origin + (first - 1) * step >= 0 && near(first - 1)) first -= 1;
   while (origin + (last + 1) * step <= length && near(last + 1)) last += 1;
   // A row or column cut off by the photo's edge has no line on that side.
-  if (origin + first * step >= MIN_EDGE_SHARE * step) first -= 1;
-  if (length - (origin + last * step) >= MIN_EDGE_SHARE * step) last += 1;
-  const positions: number[] = [];
-  for (let index = first; index <= last; index += 1) {
-    const predicted = origin + index * step;
-    const nearest = weak.reduce<number | null>(
+  const cutFirst = origin + first * step >= MIN_EDGE_SHARE * step;
+  const cutLast = length - (origin + last * step) >= MIN_EDGE_SHARE * step;
+  if (cutFirst) first -= 1;
+  if (cutLast) last += 1;
+  const nearest = (predicted: number) =>
+    weak.reduce<number | null>(
       (best, line) =>
         Math.abs(line.at - predicted) <= LINE_TOLERANCE * step &&
         (best === null || Math.abs(line.at - predicted) < Math.abs(best - predicted))
@@ -266,9 +271,21 @@ function fitLattice(
           : best,
       null,
     );
-    positions.push(Math.min(length, Math.max(0, nearest ?? predicted)));
+  const positions: number[] = [];
+  for (let index = first; index <= last; index += 1) {
+    const predicted = origin + index * step;
+    positions.push(Math.min(length, Math.max(0, nearest(predicted) ?? predicted)));
   }
-  return { step, lines: positions };
+  // Only a line at or past the photo's edge stands for it (closer than
+  // LINE_REACH, a printed line can't be seen); one further inside with
+  // nothing printed there is blank margin, not a cut.
+  const firstLine = origin + first * step;
+  const lastLine = origin + last * step;
+  const cut = {
+    first: cutFirst && firstLine <= LINE_REACH && nearest(firstLine) === null,
+    last: cutLast && lastLine >= length - LINE_REACH && nearest(lastLine) === null,
+  };
+  return { step, lines: positions, cut };
 }
 
 function leastSquares(xs: number[], ys: number[]) {
@@ -399,13 +416,25 @@ function stripLineCover(lum: Float32Array, pixels: Pixels, y: number, left: numb
   return samples === 0 ? 0 : hits / samples;
 }
 
-function borderedSides(lum: Float32Array, pixels: Pixels, left: number, top: number, right: number, bottom: number) {
-  return [
-    borderCover(lum, pixels, left, top, bottom, true),
-    borderCover(lum, pixels, right, top, bottom, true),
-    borderCover(lum, pixels, top, left, right, false),
-    borderCover(lum, pixels, bottom, left, right, false),
-  ].filter((cover) => cover >= MIN_BORDER_COVER).length;
+/**
+ * How many sides have a printed border, plus one if a side without one was
+ * cut off by the photo's edge (see MIN_BORDERED_SIDES).
+ */
+function borderedSides(
+  lum: Float32Array,
+  pixels: Pixels,
+  box: { left: number; top: number; right: number; bottom: number },
+  cut: { left: boolean; top: boolean; right: boolean; bottom: boolean },
+) {
+  const { left, top, right, bottom } = box;
+  const sides = [
+    { printed: borderCover(lum, pixels, left, top, bottom, true) >= MIN_BORDER_COVER, cut: cut.left },
+    { printed: borderCover(lum, pixels, right, top, bottom, true) >= MIN_BORDER_COVER, cut: cut.right },
+    { printed: borderCover(lum, pixels, top, left, right, false) >= MIN_BORDER_COVER, cut: cut.top },
+    { printed: borderCover(lum, pixels, bottom, left, right, false) >= MIN_BORDER_COVER, cut: cut.bottom },
+  ];
+  const printed = sides.filter((side) => side.printed).length;
+  return printed + (sides.some((side) => !side.printed && side.cut) ? 1 : 0);
 }
 
 type Colour = [r: number, g: number, b: number];
@@ -491,7 +520,12 @@ export function classifySquares(pixels: Pixels, grid: Grid): Square[] {
       const core = measure(lum, pixels, box, CORE_INSET);
       const whole = measure(lum, pixels, box, EDGE_INSET);
       if (!interior || !core || !whole) continue;
-      const sides = borderedSides(lum, pixels, box.left, box.top, box.right, box.bottom);
+      const sides = borderedSides(lum, pixels, box, {
+        left: col === 0 && grid.columns.cut.first,
+        right: col === grid.columns.lines.length - 2 && grid.columns.cut.last,
+        top: row === 0 && grid.rows.cut.first,
+        bottom: row === grid.rows.lines.length - 2 && grid.rows.cut.last,
+      });
       measured.push({ row, col, ...interior, core, whole, sides, box });
     }
   }

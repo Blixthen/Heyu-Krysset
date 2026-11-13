@@ -101,6 +101,20 @@ function picture(page: Page, rows: number, cols: number) {
   }
 }
 
+/** Crops `dx` px off the left and `dy` px off the top; a negative `dx` adds white margin instead. */
+function shift(pixels: Pixels, dx: number, dy: number): Pixels {
+  const width = pixels.width - dx;
+  const height = pixels.height - dy;
+  const data = new Uint8ClampedArray(width * height * 4).fill(WHITE);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = Math.max(0, -dx); x < width; x += 1) {
+      const from = ((y + dy) * pixels.width + x + dx) * 4;
+      data.set(pixels.data.subarray(from, from + 4), (y * width + x) * 4);
+    }
+  }
+  return { width, height, data };
+}
+
 function kinds(pixels: Pixels) {
   const grid = findGrid(pixels);
   if (!grid) throw new Error("no grid found");
@@ -180,6 +194,31 @@ describe("classifySquares", () => {
     const croppedHeight = MARGIN + (COUNT - 1) * SIZE + Math.round(SIZE * 0.75);
     const kind = kinds(new Page(20, croppedHeight).pixels());
     expect(kind(COUNT - 1, 3)).toBe("letter");
+  });
+
+  it("reads squares cut off by the photo's left and bottom edges, also beside a block, but not a clue square there", () => {
+    const croppedHeight = MARGIN + (COUNT - 1) * SIZE + Math.round(SIZE * 0.75);
+    // Drop the margin and the left line, so the first column has no left border either.
+    // Square (3,0) also has an unprinted right side: a grey block whose fill covers the line, as some magazines print them.
+    const block: Painter = (page, left, top) => page.fill(left, top + LINE, SIZE, SIZE - LINE, 200);
+    const page = new Page(20, croppedHeight).paint(COUNT - 2, 0, text).paint(3, 1, block);
+    const kind = kinds(shift(page.pixels(), MARGIN + LINE + 2, 0));
+    expect([kind(COUNT - 1, 0), kind(COUNT - 2, 0), kind(COUNT - 1, 1), kind(3, 0), kind(3, 1)]).toEqual([
+      "letter",
+      "other",
+      "letter",
+      "letter",
+      "other",
+    ]);
+  });
+
+  it("does not read blank margin beside a grid cut off at the top as a letter square", () => {
+    // Cut through the first row, and widen the left margin to 0.8 of a square,
+    // so the lattice adds a column there that the photo's edge seems to cut off.
+    const page = shift(new Page(20).pixels(), -Math.round(SIZE * 0.8 - MARGIN), MARGIN + Math.round(SIZE * 0.25));
+    const kind = kinds(page);
+    // Column 0 is the margin; the grid starts at column 1.
+    expect([kind(0, 0), kind(3, 0), kind(0, 1), kind(3, 1)]).toEqual(["other", "other", "letter", "letter"]);
   });
 });
 
