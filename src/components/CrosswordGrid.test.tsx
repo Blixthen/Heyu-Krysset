@@ -241,3 +241,57 @@ describe("CrosswordGrid photo", () => {
     expect(container.querySelectorAll("img")).toHaveLength(1);
   });
 });
+
+describe("zoom", () => {
+  afterEach(cleanup);
+
+  const shown = () => screen.getByRole("button", { name: "Återställ zoom" }).textContent;
+  const view = () => cell(0, 0).closest(".overflow-auto") as HTMLElement;
+
+  it("zooms in and out with the buttons and resets to 100 %", () => {
+    render(<Harness />);
+    expect(shown()).toBe("100 %");
+    const width = cell(0, 0).parentElement?.style.width;
+
+    fireEvent.click(screen.getByRole("button", { name: "Zooma in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zooma in" }));
+    expect(shown()).toBe("156 %");
+    expect(cell(0, 0).parentElement?.style.width).not.toBe(width);
+
+    fireEvent.click(screen.getByRole("button", { name: "Zooma ut" }));
+    expect(shown()).toBe("125 %");
+    fireEvent.click(screen.getByRole("button", { name: "Återställ zoom" }));
+    expect(shown()).toBe("100 %");
+    expect(cell(0, 0).parentElement?.style.width).toBe(width);
+  });
+
+  it("stops at the largest zoom", () => {
+    render(<Harness />);
+    for (let i = 0; i < 20; i++) fireEvent.click(screen.getByRole("button", { name: "Zooma in" }));
+    expect(shown()).toBe("400 %");
+  });
+
+  it("zooms with ctrl or ⌘ and the wheel, and leaves plain scrolling alone", () => {
+    render(<Harness />);
+    expect(fireEvent.wheel(view(), { deltaY: -200 })).toBe(true);
+    expect(shown()).toBe("100 %");
+
+    expect(fireEvent.wheel(view(), { deltaY: -200, ctrlKey: true })).toBe(false);
+    expect(shown()).toBe("149 %");
+    fireEvent.wheel(view(), { deltaY: 200, metaKey: true });
+    expect(shown()).toBe("100 %");
+  });
+
+  it("zooms with a two-finger pinch", () => {
+    render(<Harness />);
+    const touches = (spread: number) => ({ touches: [{ clientX: 100, clientY: 50 }, { clientX: 100 + spread, clientY: 50 }] });
+    fireEvent.touchStart(view(), touches(100));
+    expect(fireEvent.touchMove(view(), touches(250))).toBe(false);
+    expect(shown()).toBe("250 %");
+
+    fireEvent.touchEnd(view(), { touches: [] });
+    // One finger pans as usual.
+    expect(fireEvent.touchMove(view(), { touches: [{ clientX: 0, clientY: 0 }] })).toBe(true);
+    expect(shown()).toBe("250 %");
+  });
+});
