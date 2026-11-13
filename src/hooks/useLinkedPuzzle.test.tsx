@@ -14,14 +14,31 @@ afterEach(() => {
 });
 
 describe("useLinkedPuzzle", () => {
-  it("opens the linked puzzle", async () => {
-    const fetchMock = vi.fn(async () => Response.json(puzzle));
+  const replies = (letters: () => Promise<Response>) =>
+    vi.fn((url: string) => (url === `/api/puzzle/${ID}/letters` ? letters() : Promise.resolve(Response.json(puzzle))));
+
+  it("opens the linked puzzle with its saved letters, keeping only the puzzle's squares", async () => {
+    const saved = { letters: { "0-0": "K", "0-1": "R", "99-99": "X" }, authors: { "0-0": "Nova", "99-99": "Nova" } };
+    const fetchMock = replies(async () => Response.json(saved));
     vi.stubGlobal("fetch", fetchMock);
     const restore = vi.fn();
     const { result } = renderHook(() => useLinkedPuzzle(ID, undefined, restore));
-    await waitFor(() => expect(restore).toHaveBeenCalledWith(puzzle));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(puzzle, { letters: { "0-0": "K", "0-1": "R" }, authors: { "0-0": "Nova" } }));
     expect(fetchMock).toHaveBeenCalledWith(`/api/puzzle/${ID}`, { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith(`/api/puzzle/${ID}/letters`, { cache: "no-store" });
     expect(result.current.error).toBe("");
+  });
+
+  it.each([
+    ["none were saved", async () => Response.json({ error: "x" }, { status: 404 })],
+    ["they can't be loaded", () => Promise.reject(new TypeError("offline"))],
+    ["they are invalid", async () => Response.json({ letters: { "0-0": "KR" }, authors: {} })],
+  ])("opens the puzzle without letters when %s", async (_name, letters) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", replies(letters));
+    const restore = vi.fn();
+    renderHook(() => useLinkedPuzzle(ID, undefined, restore));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(puzzle, { letters: {}, authors: {} }));
   });
 
   it.each([

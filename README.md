@@ -43,11 +43,12 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
    "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`, plus the
    repository variables `NEXT_PUBLIC_SUPABASE_URL` and
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-2. Create the R2 bucket for crossword photos and puzzles, named `heyu` (bound
-   as `PHOTOS` in `wrangler.jsonc`), and let both expire after 7 days:
+2. Create the R2 bucket for crossword photos, puzzles and their letters, named `heyu` (bound
+   as `PHOTOS` in `wrangler.jsonc`), and let them expire after 7 days:
    `pnpm exec wrangler r2 bucket create heyu`,
-   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-photos photos/ --expire-days 7` and
-   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-puzzles puzzles/ --expire-days 7`.
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-photos photos/ --expire-days 7`,
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-puzzles puzzles/ --expire-days 7` and
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-letters letters/ --expire-days 7`.
 3. After the first deploy, set the runtime secrets:
    `pnpm exec wrangler secret put APP_PASSWORD` and
    `pnpm exec wrangler secret put GEMINI_API_KEY`.

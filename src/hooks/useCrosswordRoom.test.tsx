@@ -22,6 +22,7 @@ vi.mock("@/lib/supabase", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 const { useCrosswordRoom } = await import("./useCrosswordRoom");
+const { SAVE_DELAY_MS } = await import("./useLetterSaving");
 const { hasReacted } = await import("@/lib/reactions");
 
 const TOPIC = "crossword-secret";
@@ -347,6 +348,58 @@ describe("useCrosswordRoom", () => {
       await flush();
       expect(room.result.current.board.puzzle).toEqual(puzzle);
       expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({ puzzle, letters: {}, authors: {} });
+    });
+
+    it("opens a stored puzzle with its saved letters in an empty room, and shares them", async () => {
+      const room = await goLive();
+      act(() => room.result.current.restorePuzzle(puzzle, { letters: { "0-0": "K" }, authors: { "0-0": "Ola" } }));
+      await flush();
+      expect(room.result.current.board.letters).toEqual({ "0-0": "K" });
+      expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({ puzzle, letters: { "0-0": "K" }, authors: { "0-0": "Ola" } });
+    });
+
+    it("merges saved letters into the same puzzle, ours winning, and shares only letters the room lacked", async () => {
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      act(() => room.result.current.setLetter(0, 0, "a"));
+      await flush();
+      const sent = room.channel().sentEvents("puzzle").length;
+
+      act(() => room.result.current.restorePuzzle(puzzle, { letters: { "0-0": "K" }, authors: { "0-0": "Ola" } }));
+      await flush();
+      expect(room.result.current.board.letters).toEqual({ "0-0": "A" });
+      expect(room.channel().sentEvents("puzzle")).toHaveLength(sent);
+
+      act(() => room.result.current.restorePuzzle(puzzle, { letters: { "0-1": "B" }, authors: { "0-1": "Ola" } }));
+      await flush();
+      expect(room.result.current.board.letters).toEqual({ "0-0": "A", "0-1": "B" });
+      expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({
+        puzzle,
+        letters: { "0-0": "A", "0-1": "B" },
+        authors: { "0-0": "Nova", "0-1": "Ola" },
+      });
+    });
+
+    it("saves the letters once typing pauses, but not for letters a peer typed", async () => {
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      await flush();
+      const saves = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === `/api/puzzle/${puzzle.id}/letters`);
+
+      act(() => room.channel().receive("cell-update", { puzzleId: puzzle.id, row: 1, col: 1, value: "P", author: "Peer" }));
+      await flush(SAVE_DELAY_MS * 2);
+      expect(saves()).toEqual([]);
+
+      act(() => room.result.current.setLetter(0, 0, "a"));
+      act(() => room.result.current.setLetter(0, 1, "b"));
+      await flush(SAVE_DELAY_MS - 1);
+      expect(saves()).toEqual([]);
+      await flush(1);
+      expect(saves()).toHaveLength(1);
+      expect(JSON.parse(String(saves()[0][1]?.body))).toEqual({
+        letters: { "0-0": "A", "0-1": "B", "1-1": "P" },
+        authors: { "0-0": "Nova", "0-1": "Nova", "1-1": "Peer" },
+      });
     });
 
     it("keeps the room's newer puzzle over a stored older one, without sharing it", async () => {

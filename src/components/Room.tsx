@@ -44,13 +44,22 @@ export function Room({
     setChatOpen(!chatOpen);
   }
 
+  function selectFirst(shown: CrosswordPuzzle) {
+    const first = shown.cells[0];
+    setSelectedCell(first ? { row: first.row, col: first.col } : null);
+    if (first) requestAnimationFrame(() => focusCell(first));
+  }
+
   function onPuzzle(next: CrosswordPuzzle) {
     // Whatever puzzle the user picks now, the link's is no longer the point.
     link.dismiss();
     room.publishPuzzle(next);
-    const first = next.cells[0];
-    setSelectedCell(first ? { row: first.row, col: first.col } : null);
-    if (first) requestAnimationFrame(() => focusCell(first));
+    selectFirst(next);
+  }
+
+  function openLinked() {
+    const opened = link.open();
+    if (opened) selectFirst(opened);
   }
 
   return (
@@ -96,8 +105,7 @@ export function Room({
           <p>Rummet har ett annat korsord än det i länken.</p>
           <button
             type="button"
-            // Shared as the newest, so it wins in every tab; like a new upload, it starts without letters.
-            onClick={() => link.elsewhere && onPuzzle({ ...link.elsewhere, createdAt: Date.now() })}
+            onClick={openLinked}
             className="font-bold text-amber-200 underline underline-offset-2 hover:text-white"
           >
             Öppna länkens korsord

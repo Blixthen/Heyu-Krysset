@@ -31,5 +31,9 @@ export function createFakeBucket() {
       const object = objects.get(key);
       return object ? { body: new Blob([object.bytes.slice()]).stream(), etag: object.etag } : null;
     }),
+    head: vi.fn(async (key: string) => {
+      const object = objects.get(key);
+      return object ? { etag: object.etag } : null;
+    }),
   };
 }

@@ -1,6 +1,6 @@
 import { makePuzzle } from "@/test/fixtures";
 import { describe, expect, it } from "vitest";
-import { boardReducer, emptyBoard, type Board } from "./board";
+import { boardReducer, emptyBoard, restoreAddsToRoom, type Board } from "./board";
 
 const puzzle = makePuzzle();
 
@@ -157,5 +157,26 @@ describe("boardReducer", () => {
     it("ignores letters when there is no puzzle", () => {
       expect(boardReducer(emptyBoard, { type: "letter", puzzleId: "x", row: 0, col: 0, value: "A" })).toBe(emptyBoard);
     });
+  });
+});
+
+describe("restoreAddsToRoom", () => {
+  const stored = makePuzzle({ id: "stored" });
+  const other = makePuzzle({ id: "other" });
+  const board = (puzzle: Board["puzzle"], letters: Board["letters"] = {}): Board => ({ puzzle, letters, authors: {} });
+
+  it("shares a stored puzzle that took the board", () => {
+    expect(restoreAddsToRoom(emptyBoard, board(stored), "stored")).toBe(true);
+    expect(restoreAddsToRoom(board(other), board(stored), "stored")).toBe(true);
+  });
+
+  it("doesn't share when a newer puzzle kept the board", () => {
+    expect(restoreAddsToRoom(board(other), board(other), "stored")).toBe(false);
+  });
+
+  it("shares the same puzzle only when the saved letters added some", () => {
+    expect(restoreAddsToRoom(board(stored, { "0-0": "A" }), board(stored, { "0-0": "A" }), "stored")).toBe(false);
+    expect(restoreAddsToRoom(board(stored, { "0-0": "A", "0-1": "" }), board(stored, { "0-0": "A", "0-1": "" }), "stored")).toBe(false);
+    expect(restoreAddsToRoom(board(stored, { "0-0": "A" }), board(stored, { "0-0": "A", "0-1": "B" }), "stored")).toBe(true);
   });
 });

@@ -113,19 +113,24 @@ describe("Room", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("offers to open the linked puzzle when the room shows another, sharing it as the newest", async () => {
+  it("offers to open the linked puzzle when the room shows another, sharing it as the newest with its saved letters", async () => {
     const linked = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c", createdAt: 1_000 });
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(linked)));
+    const saved = { letters: { "0-0": "K" }, authors: { "0-0": "Ola" } };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(url.endsWith("/letters") ? saved : linked)));
     const restorePuzzle = vi.fn();
     const publishPuzzle = vi.fn();
     room.current = roomState({ board: { puzzle: makePuzzle({ id: "today", createdAt: 2_000 }), letters: {}, authors: {} }, restorePuzzle, publishPuzzle });
     render(<Room nickname="Nova" linkedPuzzleId={linked.id} onLeave={() => {}} />);
 
-    await waitFor(() => expect(restorePuzzle).toHaveBeenCalledWith(linked));
+    await waitFor(() => expect(restorePuzzle).toHaveBeenCalledWith(linked, saved));
     fireEvent.click(screen.getByRole("button", { name: "Öppna länkens korsord" }));
-    const shared = publishPuzzle.mock.calls[0][0];
-    expect({ ...shared, createdAt: 0 }).toEqual({ ...linked, createdAt: 0 });
-    expect(shared.createdAt).toBeGreaterThan(2_000);
+    // Restored, not loaded empty, so the next save can't wipe its saved letters.
+    expect(publishPuzzle).not.toHaveBeenCalled();
+    const [opened, letters] = restorePuzzle.mock.calls[1];
+    expect({ ...opened, createdAt: 0 }).toEqual({ ...linked, createdAt: 0 });
+    expect(opened.createdAt).toBeGreaterThan(2_000);
+    expect(letters).toEqual(saved);
+    expect(screen.queryByRole("button", { name: "Öppna länkens korsord" })).toBeNull();
     vi.unstubAllGlobals();
   });
 
