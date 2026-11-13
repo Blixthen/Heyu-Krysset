@@ -43,6 +43,14 @@ describe("boardReducer", () => {
       const state = withLetters({});
       expect(boardReducer(state, { type: "photo", puzzleId: "older", photo: PHOTO })).toBe(state);
     });
+
+    it("attaches the photo of the puzzle the current one starts over", () => {
+      const state: Board = { puzzle: makePuzzle({ id: "copy", restartOf: "first" }), letters: { "0-0": "A" }, authors: {} };
+      const next = boardReducer(state, { type: "photo", puzzleId: "first", photo: PHOTO });
+      expect(next.puzzle).toEqual({ ...state.puzzle, photo: PHOTO });
+      expect(next.letters).toEqual({ "0-0": "A" });
+      expect(boardReducer(state, { type: "photo", puzzleId: "other", photo: PHOTO })).toBe(state);
+    });
   });
 
   describe("remote-puzzle", () => {

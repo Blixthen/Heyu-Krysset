@@ -5,12 +5,13 @@ import { useLinkedPuzzle } from "@/hooks/useLinkedPuzzle";
 import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
 import { playerColours } from "@/lib/players";
-import { Grid3x3 } from "lucide-react";
+import { restartedPuzzle } from "@/lib/storedPuzzle";
+import { Grid3x3, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { CrosswordGrid, focusCell } from "./CrosswordGrid";
 import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
-import { PuzzleUploader } from "./PuzzleUploader";
+import { PuzzleUploader, savePuzzle } from "./PuzzleUploader";
 
 export function Room({
   nickname,
@@ -62,6 +63,20 @@ export function Room({
     if (opened) selectFirst(opened);
   }
 
+  function onPhoto(puzzleId: string, photo: string) {
+    const updated = room.attachPhoto(puzzleId, photo);
+    // The uploader saves only the puzzle it uploaded; a copy started over before the photo was stored needs it too.
+    if (updated && updated.id !== puzzleId) void savePuzzle(updated);
+  }
+
+  function restart() {
+    if (!puzzle || !window.confirm("Börja om korsordet? Alla bokstäver försvinner, för alla i rummet.")) return;
+    const next = restartedPuzzle(puzzle, crypto.randomUUID(), Date.now());
+    onPuzzle(next);
+    // The same squares and photo, so only the copy needs saving for its link.
+    void savePuzzle(next);
+  }
+
   return (
     <main className="flex h-dvh max-h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
       {/* Phones have no room beside the title and buttons, so the photo gets its own row above them. */}
@@ -86,7 +101,19 @@ export function Room({
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
-          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} onPhoto={room.attachPhoto} /> : null}
+          {puzzle ? (
+            <button
+              type="button"
+              onClick={restart}
+              aria-label="Börja om"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
+            >
+              <RotateCcw className="size-3.5" />
+              {/* Phones only fit the icon beside the other buttons. */}
+              <span className="hidden sm:inline">Börja om</span>
+            </button>
+          ) : null}
+          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} onPhoto={onPhoto} /> : null}
           <button
             type="button"
             onClick={onLeave}
@@ -141,7 +168,7 @@ export function Room({
               </div>
             </div>
           ) : (
-            <PuzzleUploader onPuzzle={onPuzzle} onPhoto={room.attachPhoto} />
+            <PuzzleUploader onPuzzle={onPuzzle} onPhoto={onPhoto} />
           )}
         </section>
 

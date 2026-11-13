@@ -1,6 +1,6 @@
 "use client";
 
-import { boardReducer, emptyBoard, restoreAddsToRoom, type BoardAction } from "@/lib/board";
+import { boardReducer, emptyBoard, photoBelongsTo, restoreAddsToRoom, type BoardAction } from "@/lib/board";
 import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, toChatMessage, type ChatMessage } from "@/lib/chat";
 import {
   authorsFromPayload,
@@ -323,15 +323,17 @@ export function useCrosswordRoom(nickname: string) {
   );
 
   const attachPhoto = useCallback(
-    (puzzleId: string, photo: string) => {
+    (puzzleId: string, photo: string): CrosswordPuzzle | null => {
       const { puzzle, letters, authors } = boardRef.current;
       // A newer puzzle replaced this one meanwhile, or it has its photo already.
-      if (!puzzle || puzzle.id !== puzzleId || puzzle.photo !== undefined) return;
+      if (!puzzle || !photoBelongsTo(puzzle, puzzleId) || puzzle.photo !== undefined) return null;
       apply({ type: "photo", puzzleId, photo });
+      const updated = { ...puzzle, photo };
       // Peers take the photo from a full board for the same puzzle. If we are
       // offline, it goes out with the board when the channel subscribes.
       const channel = channelRef.current;
-      if (channel) void broadcastPuzzle(channel, { ...puzzle, photo }, letters, authors);
+      if (channel) void broadcastPuzzle(channel, updated, letters, authors);
+      return updated;
     },
     [apply, broadcastPuzzle],
   );

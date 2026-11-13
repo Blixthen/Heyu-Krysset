@@ -6,6 +6,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const room = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/hooks/useCrosswordRoom", () => ({ useCrosswordRoom: () => room.current }));
+// The real uploader, with its latest onPhoto kept so a test can report a stored photo.
+const uploader = vi.hoisted(() => ({ onPhoto: undefined as ((puzzleId: string, photo: string) => void) | undefined }));
+vi.mock("./PuzzleUploader", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./PuzzleUploader")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    PuzzleUploader: (props: Parameters<typeof actual.PuzzleUploader>[0]) => {
+      uploader.onPhoto = props.onPhoto;
+      return createElement(actual.PuzzleUploader, props);
+    },
+  };
+});
 
 const { Room } = await import("./Room");
 
@@ -39,6 +52,7 @@ describe("Room", () => {
     render(<Room nickname="Nova" onLeave={() => {}} />);
     expect(screen.getByText("Här hamnar korsordet")).toBeTruthy();
     expect(screen.queryByText("Nytt korsord")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Börja om" })).toBeNull();
   });
 
   it("lets you replace an existing puzzle", () => {
@@ -46,6 +60,68 @@ describe("Room", () => {
     render(<Room nickname="Nova" onLeave={() => {}} />);
     expect(screen.getByText("Nytt korsord")).toBeTruthy();
     expect(screen.getAllByRole("textbox").length).toBeGreaterThan(1);
+  });
+
+  it("starts the same crossword over as a new puzzle for everyone, with its own saved link", async () => {
+    const original = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c", createdAt: 1_000, photo: "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d" });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const publishPuzzle = vi.fn();
+    room.current = roomState({ board: { puzzle: original, letters: { "0-0": "K" }, authors: {} }, publishPuzzle });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Börja om" }));
+    const restarted = publishPuzzle.mock.calls[0][0];
+    expect(restarted.id).not.toBe(original.id);
+    expect(restarted.createdAt).toBeGreaterThan(original.createdAt);
+    expect({ ...restarted, id: original.id, createdAt: original.createdAt }).toEqual({ ...original, restartOf: original.id });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/puzzle", expect.objectContaining({ method: "POST" })));
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual(restarted);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("saves a copy started over once the photo of the puzzle it copies is stored", async () => {
+    const PHOTO = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    const original = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
+    const copy = makePuzzle({ id: "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", restartOf: original.id, photo: PHOTO });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const attachPhoto = vi.fn((puzzleId: string) => (puzzleId === original.id ? copy : null));
+    room.current = roomState({ board: { puzzle: copy, letters: {}, authors: {} }, attachPhoto });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+
+    uploader.onPhoto?.(original.id, PHOTO);
+    expect(attachPhoto).toHaveBeenCalledWith(original.id, PHOTO);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/puzzle");
+    expect(JSON.parse(String(init.body))).toEqual(copy);
+
+    // A photo for the puzzle itself is the uploader's to save.
+    attachPhoto.mockReturnValue({ ...copy });
+    uploader.onPhoto?.(copy.id, PHOTO);
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the letters when starting over isn't confirmed", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const publishPuzzle = vi.fn();
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: { "0-0": "K" }, authors: {} }, publishPuzzle });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Börja om" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(publishPuzzle).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("lists the players who typed letters, with the colour their letters have", () => {

@@ -12,7 +12,7 @@ export type BoardAction =
   | { type: "load"; puzzle: CrosswordPuzzle }
   /** A peer shared its puzzle state. */
   | { type: "remote-puzzle"; puzzle: CrosswordPuzzle; letters: Letters; authors: Authors }
-  /** This client stored the puzzle's photo. */
+  /** This client stored the photo of this puzzle, or of the one it starts over. */
   | { type: "photo"; puzzleId: string; photo: string }
   /** A letter was typed, locally or by a peer. */
   | { type: "letter"; puzzleId: string; row: number; col: number; value: string; author?: string };
@@ -33,6 +33,15 @@ function authorsFor(letters: Letters, ours: Board, theirs: { letters: Letters; a
     if (letter && author) authors[key] = author;
   }
   return authors;
+}
+
+/**
+ * Whether a photo stored for `puzzleId` belongs on this puzzle: its own, or
+ * that of the puzzle it starts over, when someone started over before the
+ * upload finished.
+ */
+export function photoBelongsTo(puzzle: CrosswordPuzzle, puzzleId: string) {
+  return puzzle.id === puzzleId || puzzle.restartOf === puzzleId;
 }
 
 /** The puzzle with a stored photo filled in if it has none; a photo is never replaced. */
@@ -67,7 +76,7 @@ export function boardReducer(state: Board, action: BoardAction): Board {
 
     case "photo": {
       const puzzle = state.puzzle;
-      if (!puzzle || puzzle.id !== action.puzzleId) return state;
+      if (!puzzle || !photoBelongsTo(puzzle, action.puzzleId)) return state;
       const next = withPhoto(puzzle, action.photo);
       return next === puzzle ? state : { ...state, puzzle: next };
     }

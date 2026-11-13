@@ -1,4 +1,4 @@
-import { isPhotoId } from "./photo";
+import { isPhotoId, isRandomId } from "./photo";
 import { isPlayerName } from "./players";
 
 /**
@@ -24,6 +24,11 @@ export type CrosswordPuzzle = {
   image: string;
   /** The sharp copy in photo storage, if the upload worked; optional, since older tabs send none. */
   photo?: string;
+  /**
+   * The puzzle this one starts over (restartedPuzzle), so a photo stored for
+   * that one still reaches it; optional, since older tabs send none.
+   */
+  restartOf?: string;
   cells: LetterCell[];
 };
 
@@ -111,6 +116,7 @@ export function isCrosswordPuzzle(value: unknown): value is CrosswordPuzzle {
     !Number.isFinite(candidate.createdAt) ||
     !isImageDataUrl(candidate.image) ||
     (candidate.photo !== undefined && !isPhotoId(candidate.photo)) ||
+    (candidate.restartOf !== undefined && !isRandomId(candidate.restartOf)) ||
     !Array.isArray(candidate.cells) ||
     candidate.cells.length < MIN_CELLS ||
     candidate.cells.length > MAX_CELLS ||
@@ -129,6 +135,7 @@ export function toCrosswordPuzzle(puzzle: CrosswordPuzzle): CrosswordPuzzle {
     createdAt: puzzle.createdAt,
     image: puzzle.image,
     ...(puzzle.photo === undefined ? {} : { photo: puzzle.photo }),
+    ...(puzzle.restartOf === undefined ? {} : { restartOf: puzzle.restartOf }),
     cells: puzzle.cells.map(toLetterCell),
   };
 }

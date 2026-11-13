@@ -342,6 +342,28 @@ describe("useCrosswordRoom", () => {
       });
     });
 
+    it("attaches a photo stored for the puzzle the current one starts over, and returns the updated copy", async () => {
+      const PHOTO = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+      const copy = makePuzzle({ id: "copy", createdAt: puzzle.createdAt + 1, restartOf: puzzle.id });
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      act(() => room.result.current.publishPuzzle(copy));
+      await flush();
+      let updated: unknown;
+      act(() => {
+        updated = room.result.current.attachPhoto(puzzle.id, PHOTO);
+      });
+      await flush();
+      expect(updated).toEqual({ ...copy, photo: PHOTO });
+      expect(room.result.current.board.puzzle).toEqual({ ...copy, photo: PHOTO });
+      expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({ puzzle: { ...copy, photo: PHOTO }, letters: {}, authors: {} });
+      let again: unknown;
+      act(() => {
+        again = room.result.current.attachPhoto(puzzle.id, PHOTO);
+      });
+      expect(again).toBeNull();
+    });
+
     it("opens a stored puzzle in an empty room and shares it", async () => {
       const room = await goLive();
       act(() => room.result.current.restorePuzzle(puzzle));
