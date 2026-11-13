@@ -26,13 +26,26 @@ function render(bitmap: ImageBitmap, maxWidth: number, quality: number) {
   return draw(bitmap, maxWidth).canvas.toDataURL("image/jpeg", quality);
 }
 
+/**
+ * The canvas's pixels, or null if the browser refuses to hand them out
+ * (fingerprinting protection, canvas memory limits). Reading the grid in the
+ * browser is optional, since Gemini can still read the JPEG.
+ */
+function readPixels(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
+  try {
+    return context.getImageData(0, 0, canvas.width, canvas.height);
+  } catch {
+    return null;
+  }
+}
+
 function base64Of(dataUrl: string) {
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
 /**
  * Prepares one photo for reading and sharing: the pixels of the analysis-size
- * image for reading the grid in the browser, the same image as a high-quality
+ * image for reading the grid in the browser (null if the browser refuses), the same image as a high-quality
  * JPEG for Gemini when that fails, and a smaller JPEG that fits in a realtime
  * broadcast. Cell coordinates are relative (0–1000), so they apply to all three.
  */
@@ -40,7 +53,7 @@ export async function prepareImages(file: File) {
   const bitmap = await createImageBitmap(file);
   try {
     const { canvas, context } = draw(bitmap, ANALYZE_MAX_WIDTH);
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = readPixels(canvas, context);
     const analyze = base64Of(canvas.toDataURL("image/jpeg", 0.82));
     let share = "";
     search: for (const width of SHARE_WIDTHS) {

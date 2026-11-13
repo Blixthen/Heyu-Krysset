@@ -1,33 +1,48 @@
 "use client";
 
 import { dedupeCells, isLetterCell, MIN_CELLS, type CrosswordPuzzle, type LetterCell } from "@/lib/crossword";
-import { readGrid } from "@/lib/gridImage";
+import { readGrid, type Pixels } from "@/lib/gridImage";
 import { prepareImages } from "@/lib/image";
 import { Camera, ImagePlus, Loader2 } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
 class UploadError extends Error {}
 
-type PreparedImages = Awaited<ReturnType<typeof prepareImages>>;
+type Upload = Omit<Awaited<ReturnType<typeof prepareImages>>, "pixels">;
 
 /**
  * Reads the grid from the photo's pixels in the browser, and asks Gemini only
  * when that finds no usable grid. Returns a puzzle ready to share.
  */
 export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
-  let images: PreparedImages;
+  const { cells, upload } = await prepare(file);
+  return {
+    id: crypto.randomUUID(),
+    createdAt: Date.now(),
+    image: upload.shareDataUrl,
+    cells: cells ?? (await askGemini(upload)),
+  };
+}
+
+/**
+ * Prepares the images and reads the grid. The pixel buffer (about 11 MB at
+ * 1400 px) stays inside this call, so it can be freed before any Gemini
+ * request, which may take seconds on a phone that is short of memory.
+ */
+async function prepare(file: File): Promise<{ cells: LetterCell[] | null; upload: Upload }> {
+  let images: Awaited<ReturnType<typeof prepareImages>>;
   try {
     images = await prepareImages(file);
   } catch {
     throw new UploadError("Kunde inte läsa bilden. Prova en JPEG- eller PNG-bild.");
   }
-  const cells = readLocally(images) ?? (await askGemini(images));
-  return { id: crypto.randomUUID(), createdAt: Date.now(), image: images.shareDataUrl, cells };
+  const { pixels, ...upload } = images;
+  return { cells: pixels ? readLocally(pixels) : null, upload };
 }
 
-function readLocally(images: PreparedImages) {
+function readLocally(pixels: Pixels) {
   try {
-    const cells = readGrid(images.pixels);
+    const cells = readGrid(pixels);
     if (!cells) console.info("No grid found in the photo; asking Gemini.");
     return cells;
   } catch (error) {
@@ -37,7 +52,7 @@ function readLocally(images: PreparedImages) {
   }
 }
 
-async function askGemini(images: PreparedImages): Promise<LetterCell[]> {
+async function askGemini(images: Upload): Promise<LetterCell[]> {
   let response: Response;
   try {
     response = await fetch("/api/analyze-crossword", {

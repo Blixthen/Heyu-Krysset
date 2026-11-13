@@ -40,6 +40,15 @@ describe("analyzeCrossword", () => {
     expect(puzzle.image).toBe("data:image/jpeg;base64,SMALL");
   });
 
+  it("asks Gemini without reading the grid when the browser gave no pixels", async () => {
+    prepareImages.mockResolvedValue({ pixels: null, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    const cells = gridCells(2, 4);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ cells })));
+
+    expect((await analyzeCrossword(file)).cells).toEqual(cells);
+    expect(readGrid).not.toHaveBeenCalled();
+  });
+
   it("asks Gemini when the grid reading fails with an error", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     readGrid.mockImplementation(() => {

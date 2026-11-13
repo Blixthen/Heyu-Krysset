@@ -45,6 +45,19 @@ describe("prepareImages", () => {
     expect(images.pixels).toEqual({ width: 1400, height: 1960, from: 1400 });
   });
 
+  it("still prepares the JPEGs when the browser refuses to hand out pixels", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: () => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,AAAA");
+    const images = await prepareImages(file);
+    expect(images.pixels).toBeNull();
+    expect(images.analyzeBase64).toBe("AAAA");
+  });
+
   it("uses the best share quality that fits the budget", async () => {
     fakeCanvas(0.01);
     const images = await prepareImages(file);
