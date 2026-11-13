@@ -254,6 +254,54 @@ describe("useCrosswordRoom", () => {
       expect(room.result.current.online).toEqual(["Nova"]);
     });
 
+    it("keeps the same list when a sync doesn't change the names, so nothing rerenders", async () => {
+      const room = await goLive();
+      act(() => room.channel().syncPresence({ a: [{ nickname: "Kim" }] }));
+      const first = room.result.current.online;
+      act(() => room.channel().syncPresence({ b: [{ nickname: "Kim" }] }));
+      expect(room.result.current.online).toBe(first);
+    });
+
+    it("retries a failed announcement a few times, then stops", async () => {
+      const room = await connect();
+      room.channel().trackResult = "error";
+      act(() => room.channel().status("SUBSCRIBED"));
+      await flush();
+      expect(room.channel().track).toHaveBeenCalledTimes(1);
+      await flush(1000);
+      expect(room.channel().track).toHaveBeenCalledTimes(2);
+      await flush(10_000);
+      expect(room.channel().track).toHaveBeenCalledTimes(4);
+    });
+
+    it("stops retrying once an announcement gets through", async () => {
+      const room = await connect();
+      room.channel().trackResult = "timed out";
+      act(() => room.channel().status("SUBSCRIBED"));
+      await flush();
+      room.channel().trackResult = "ok";
+      await flush(10_000);
+      expect(room.channel().track).toHaveBeenCalledTimes(2);
+    });
+
+    it("announces again when a presence sync is missing us", async () => {
+      const room = await goLive();
+      const clientId = room.result.current.clientId;
+      act(() => room.channel().syncPresence({ [clientId]: [{ nickname: "Nova" }] }));
+      await flush();
+      expect(room.channel().track).toHaveBeenCalledTimes(1);
+      act(() => room.channel().syncPresence({ other: [{ nickname: "Kim" }] }));
+      await flush();
+      expect(room.channel().track).toHaveBeenCalledTimes(2);
+    });
+
+    it("forgets who was online when the channel drops", async () => {
+      const room = await goLive();
+      act(() => room.channel().syncPresence({ a: [{ nickname: "Kim" }] }));
+      act(() => room.channel().status("CHANNEL_ERROR"));
+      expect(room.result.current.online).toEqual([]);
+    });
+
     it("does not announce a nickname peers would reject", async () => {
       const hook = renderHook(() => useCrosswordRoom(" Nova"));
       await flush();

@@ -51,7 +51,7 @@ describe("Room", () => {
     room.current = roomState({ board });
     render(<Room nickname="Nova" onLeave={() => {}} />);
     const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
-    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv", "Nova"]);
+    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv"]);
     // Ann and Liv hash to the same colour, so Liv moves on to another; each dot matches its letters' tint.
     const dot = (item: Element) => item.querySelector("span")?.className.match(/\bbg-(\w+)-300\b/)?.[1];
     const tint = (label: string) => screen.getByLabelText(label).className.match(/\bbg-(\w+)-300\/40\b/)?.[1];
@@ -60,19 +60,25 @@ describe("Room", () => {
     expect(dot(players[0])).not.toBe(dot(players[1]));
   });
 
-  it("gives a colour to everyone in the room before they type, and to us", () => {
+  it("gives a colour to everyone in the room before they type, after those who typed", () => {
     const board = { puzzle: makePuzzle(), letters: { "0-0": "A" }, authors: { "0-0": "Liv" } };
     room.current = roomState({ board, online: ["Ann", "Nova"] });
     render(<Room nickname="Nova" onLeave={() => {}} />);
     const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
-    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv", "Nova"]);
+    expect(players.map((item) => item.textContent)).toEqual(["Liv", "Ann", "Nova"]);
   });
 
-  it("gives us a colour before presence has synced", () => {
-    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} } });
-    render(<Room nickname="Nova" onLeave={() => {}} />);
-    const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
-    expect(players.map((item) => item.textContent)).toEqual(["Nova"]);
+  it("keeps a typist's letter colour when someone watching clashes with it, or leaves", () => {
+    const board = { puzzle: makePuzzle(), letters: { "0-0": "A" }, authors: { "0-0": "Liv" } };
+    const tint = () => screen.getByLabelText("Rad 1, ruta 1").className.match(/\bbg-(\w+)-300\/40\b/)?.[1];
+    // Ann sorts before Liv and hashes to the same colour.
+    room.current = roomState({ board, online: ["Ann", "Liv"] });
+    const { rerender } = render(<Room nickname="Liv" onLeave={() => {}} />);
+    const watched = tint();
+    room.current = roomState({ board, online: ["Liv"] });
+    rerender(<Room nickname="Liv" onLeave={() => {}} />);
+    expect(tint()).toBe(watched);
+    expect(watched).toBeTruthy();
   });
 
   it("folds the chat on phones and counts messages that arrive while it is folded", () => {

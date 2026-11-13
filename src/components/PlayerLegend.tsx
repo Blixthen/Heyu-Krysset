@@ -15,7 +15,7 @@ export const PLAYER_COLOURS = [
   { tint: "bg-teal-300/40", dot: "bg-teal-300" },
 ] as const;
 
-/** Who has which colour, for the players who have typed a letter. */
+/** Who has which colour: the players who typed letters and those in the room. */
 export function PlayerLegend({ colours }: { colours: Map<string, number> }) {
   if (colours.size === 0) return null;
   return (
