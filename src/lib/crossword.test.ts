@@ -1,6 +1,9 @@
 import { gridCells, makePuzzle } from "@/test/fixtures";
 import { describe, expect, it } from "vitest";
 import {
+  adjacentCell,
+  chooseDirection,
+  toggleDirection,
   dedupeCells,
   findNeighbor,
   isCellUpdate,
@@ -10,6 +13,8 @@ import {
   lettersFromPayload,
   oneLetter,
   toCrosswordPuzzle,
+  wordCells,
+  type LetterCell,
 } from "./crossword";
 
 const cell = { row: 0, col: 0, x: 10, y: 10, w: 50, h: 50 };
@@ -135,5 +140,58 @@ describe("findNeighbor", () => {
     const sameLine = { row: 0, col: 1, x: 200, y: 0, w: 50, h: 50 };
     const diagonal = { row: 1, col: 1, x: 60, y: 60, w: 50, h: 50 };
     expect(findNeighbor([from, sameLine, diagonal], from, 0, 1)).toBe(sameLine);
+  });
+});
+
+describe("words", () => {
+  // A down word in column 0 and column 2, an across word on row 0 and a short
+  // one on row 3; (1,1) and (2,1) are clue squares, so there is a gap there.
+  //   A B C
+  //   D . E
+  //   F . G
+  //   H I
+  const positions = [[0, 0], [0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 2], [3, 0], [3, 1]];
+  const cells: LetterCell[] = positions.map(([row, col]) => ({ row, col, x: 100 + col * 100, y: 100 + row * 100, w: 90, h: 90 }));
+  const at = (row: number, col: number) => cells.find((c) => c.row === row && c.col === col)!;
+  const positionsOf = (word: LetterCell[]) => word.map((c) => [c.row, c.col]);
+
+  it("finds the adjacent cell but not one across a clue square", () => {
+    expect(adjacentCell(cells, at(0, 0), 1, 0)).toBe(at(1, 0));
+    expect(findNeighbor(cells, at(0, 1), 1, 0)).toBe(at(3, 1));
+    expect(adjacentCell(cells, at(0, 1), 1, 0)).toBeNull();
+  });
+
+  it("treats boxes drawn tighter than the grid as neighbours, but not across a clue square", () => {
+    // 30-unit boxes on a 50-unit pitch, as Gemini sometimes draws them; column 2 is a clue square.
+    const tight = [0, 1, 3].map((col) => ({ row: 0, col, x: 100 + col * 50, y: 100, w: 30, h: 30 }));
+    expect(adjacentCell(tight, tight[0], 0, 1)).toBe(tight[1]);
+    expect(adjacentCell(tight, tight[1], 0, 1)).toBeNull();
+  });
+
+  it("switches direction on a second tap only where a word runs the other way", () => {
+    expect(toggleDirection(cells, at(0, 0), "across")).toBe("down");
+    expect(toggleDirection(cells, at(0, 0), "down")).toBe("across");
+    expect(toggleDirection(cells, at(1, 0), "down")).toBe("down");
+  });
+
+  it("chooses the direction a word runs through the selected cell", () => {
+    expect(chooseDirection(cells, at(1, 0), "across")).toBe("down");
+    expect(chooseDirection(cells, at(0, 1), "down")).toBe("across");
+  });
+
+  it("keeps the current direction where an across and a down word cross", () => {
+    expect(chooseDirection(cells, at(0, 0), "down")).toBe("down");
+    expect(chooseDirection(cells, at(0, 0), "across")).toBe("across");
+  });
+
+  it("keeps the current direction for a cell in no word", () => {
+    const lone = { row: 9, col: 9, x: 800, y: 800, w: 90, h: 90 };
+    expect(chooseDirection([...cells, lone], lone, "down")).toBe("down");
+  });
+
+  it("lists a word's cells from first to last", () => {
+    expect(positionsOf(wordCells(cells, at(1, 2), "down"))).toEqual([[0, 2], [1, 2], [2, 2]]);
+    expect(positionsOf(wordCells(cells, at(0, 1), "across"))).toEqual([[0, 0], [0, 1], [0, 2]]);
+    expect(positionsOf(wordCells(cells, at(0, 1), "down"))).toEqual([[0, 1]]);
   });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { CellPosition, Letters } from "@/lib/crossword";
+import type { CellPosition, CrosswordPuzzle, Letters } from "@/lib/crossword";
 import { makePuzzle } from "@/test/fixtures";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
@@ -8,12 +8,36 @@ import { CrosswordGrid } from "./CrosswordGrid";
 
 const puzzle = makePuzzle();
 
-function Harness({ initial = {}, onLetter }: { initial?: Letters; onLetter?: (cell: CellPosition, letter: string) => void }) {
+// Row 0 is an across word, then a clue square and a one-letter cell; columns 0
+// and 2 are down words; (1,1) and (2,1) are clue squares.
+//   A B C . H
+//   D . E
+//   F . G
+const withClues = makePuzzle({
+  cells: [[0, 0], [0, 1], [0, 2], [0, 4], [1, 0], [1, 2], [2, 0], [2, 2]].map(([row, col]) => ({
+    row,
+    col,
+    x: 100 + col * 100,
+    y: 100 + row * 100,
+    w: 90,
+    h: 90,
+  })),
+});
+
+function Harness({
+  initial = {},
+  onLetter,
+  puzzle: shown = puzzle,
+}: {
+  initial?: Letters;
+  onLetter?: (cell: CellPosition, letter: string) => void;
+  puzzle?: CrosswordPuzzle;
+}) {
   const [letters, setLetters] = useState<Letters>(initial);
   const [selected, setSelected] = useState<CellPosition | null>(null);
   return (
     <CrosswordGrid
-      puzzle={puzzle}
+      puzzle={shown}
       letters={letters}
       selectedCell={selected}
       onSelect={setSelected}
@@ -50,6 +74,66 @@ describe("CrosswordGrid", () => {
     expect(document.activeElement).toBe(cell(1, 0));
     fireEvent.change(cell(1, 0), { target: { value: "a" } });
     expect(document.activeElement).toBe(cell(2, 0));
+  });
+
+  it("types downward after selecting a cell in a down word", () => {
+    render(<Harness puzzle={withClues} />);
+    cell(1, 2).focus();
+    fireEvent.change(cell(1, 2), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(2, 2));
+  });
+
+  it("types across again after selecting a cell in an across word", () => {
+    render(<Harness puzzle={withClues} />);
+    cell(1, 0).focus();
+    cell(0, 1).focus();
+    fireEvent.change(cell(0, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(0, 2));
+  });
+
+  it("switches direction when the selected cell is tapped again", () => {
+    render(<Harness />);
+    cell(1, 1).focus();
+    fireEvent.pointerDown(cell(1, 1));
+    fireEvent.click(cell(1, 1));
+    fireEvent.change(cell(1, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(2, 1));
+  });
+
+  it("does not switch direction after a cancelled tap", () => {
+    render(<Harness />);
+    cell(1, 1).focus();
+    fireEvent.pointerDown(cell(1, 1));
+    fireEvent.pointerCancel(cell(1, 1));
+    fireEvent.click(cell(1, 1));
+    fireEvent.change(cell(1, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(1, 2));
+  });
+
+  it("keeps the word's direction when an arrow key hits the edge", () => {
+    render(<Harness puzzle={withClues} />);
+    cell(1, 0).focus();
+    fireEvent.keyDown(cell(1, 0), { key: "ArrowLeft" });
+    fireEvent.change(cell(1, 0), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(2, 0));
+  });
+
+  it("does not switch direction on the first tap", () => {
+    render(<Harness />);
+    fireEvent.pointerDown(cell(1, 1));
+    cell(1, 1).focus();
+    fireEvent.click(cell(1, 1));
+    fireEvent.change(cell(1, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(1, 2));
+  });
+
+  it("stops at the end of a word instead of jumping over a clue square", () => {
+    render(<Harness puzzle={withClues} />);
+    cell(0, 1).focus();
+    fireEvent.change(cell(0, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(0, 2));
+    fireEvent.change(cell(0, 2), { target: { value: "b" } });
+    expect(document.activeElement).toBe(cell(0, 2));
   });
 
   it("replaces the letter when typing into a filled cell", () => {
