@@ -26,16 +26,25 @@ class Page {
     }
   }
 
-  fill(x: number, y: number, w: number, h: number, shade: number) {
+  fill(x: number, y: number, w: number, h: number, shade: number | [r: number, g: number, b: number]) {
+    const [r, g, b] = typeof shade === "number" ? [shade, shade, shade] : shade;
     for (let yy = Math.max(0, y); yy < Math.min(this.height, y + h); yy += 1) {
       for (let xx = Math.max(0, x); xx < Math.min(this.width, x + w); xx += 1) {
-        this.data.set([shade, shade, shade, 255], (yy * this.width + xx) * 4);
+        this.data.set([r, g, b, 255], (yy * this.width + xx) * 4);
       }
     }
   }
 
   paint(row: number, col: number, painter: Painter) {
     painter(this, MARGIN + col * SIZE, MARGIN + row * SIZE);
+    return this;
+  }
+
+  /** Scales every channel, like a photo taken under coloured light. */
+  cast(factors: [r: number, g: number, b: number]) {
+    for (let at = 0; at < this.data.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) this.data[at + channel] *= factors[channel];
+    }
     return this;
   }
 
@@ -67,6 +76,8 @@ const strip: Painter = (page, left, top) => {
 /** A clue square with one short word near its top and no line: the word must not pass for a strip's line. */
 const word: Painter = (page, left, top) => page.fill(left + 8, top + 12, 24, 2, 30);
 const grey: Painter = (page, left, top) => page.fill(left + 1, top + 1, SIZE - 1, SIZE - 1, 200);
+/** A letter square printed pale green, as solution words often are: darker than the paper, like the grey block. */
+const green: Painter = (page, left, top) => page.fill(left + 1, top + 1, SIZE - 1, SIZE - 1, [180, 210, 206]);
 
 /** A plain white area of a photograph (like a wall) over a block of squares: blank, but no grid lines. */
 function whiteArea(page: Page, row: number, col: number, size: number) {
@@ -141,6 +152,13 @@ describe("classifySquares", () => {
     expect(kind(1, 1)).toBe("other");
     expect(kind(1, 6)).toBe("letter");
     expect(kind(4, 6)).toBe("other");
+  });
+
+  it("reads tinted letter squares but not grey blocks, also under a warm colour cast", () => {
+    for (const cast of [[1, 1, 1], [1, 0.95, 0.82]] as const) {
+      const kind = kinds(new Page(20).paint(2, 3, green).paint(2, 4, grey).cast([...cast]).pixels());
+      expect([kind(2, 3), kind(2, 4)], `cast ${cast.join(", ")}`).toEqual(["letter", "other"]);
+    }
   });
 
   it("reads squares cut off by the photo's bottom edge", () => {

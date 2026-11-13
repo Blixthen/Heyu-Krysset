@@ -148,6 +148,24 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
       "clue area at (183, 475) read as letter square (7,1)",
     ],
   },
+  {
+    name: "mumin",
+    description: "Moomin print, picture top right, solution squares tinted green",
+    minCells: 150,
+    // The first five letter points are green; the big arrows that lead the solution word between them are not letter squares.
+    letterPoints: [[363, 182], [363, 494], [473, 689], [803, 689], [586, 689], [143, 222], [912, 845], [308, 143], [747, 416], [143, 845]],
+    cluePoints: [[88, 143], [418, 182], [363, 338], [376, 689], [693, 689], [858, 689], [693, 245], [208, 74], [912, 768], [199, 769], [473, 651]],
+    knownProblems: [
+      "letter square at (473, 689) not found",
+      "letter square at (308, 143) not found",
+      "clue area at (363, 338) read as letter square (4,4)",
+      "clue area at (376, 689) read as letter square (12,4)",
+      "clue area at (693, 689) read as letter square (12,8)",
+      "clue area at (858, 689) read as letter square (12,11)",
+      "clue area at (912, 768) read as letter square (13,12)",
+      "clue area at (199, 769) read as letter square (13,1)",
+    ],
+  },
 ];
 
 const DIRECTORY = fileURLToPath(new URL(".", import.meta.url));

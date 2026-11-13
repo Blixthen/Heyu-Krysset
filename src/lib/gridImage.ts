@@ -80,6 +80,13 @@ const MAX_LETTER_INK = 0.02;
  * blocks, whatever the photo's exposure.
  */
 const MAX_LETTER_DIMMING = 25;
+/**
+ * …or, if darker, is tinted: its colour (each channel over the channel mean)
+ * differs from the paper's by at least this much in some channel. Solution
+ * words are often printed on pale green, blue or pink, while blocks are
+ * neutral grey; comparing with the paper keeps a warm photo's grey neutral.
+ */
+const MIN_LETTER_TINT = 0.05;
 /** …is this even (standard deviation of luminance), which rules out photographs. */
 const MAX_LETTER_SPREAD = 22;
 /** …and has printed borders on at least this many sides; a white area of a picture has none. */
@@ -400,9 +407,16 @@ function borderedSides(lum: Float32Array, pixels: Pixels, left: number, top: num
   ].filter((cover) => cover >= MIN_BORDER_COVER).length;
 }
 
-type Measure = { ink: number; brightness: number; spread: number };
+type Colour = [r: number, g: number, b: number];
+type Measure = { ink: number; brightness: number; spread: number; colour: Colour };
 
-/** Ink share, mean brightness and evenness inside a square, inset by `inset` of its size on each side. */
+/** Each channel over the channel mean, so exposure cancels out and only the hue is left. */
+function chromaticity([r, g, b]: Colour): Colour {
+  const mean = (r + g + b) / 3 || 1;
+  return [r / mean, g / mean, b / mean];
+}
+
+/** Ink share, mean brightness and colour, and evenness inside a square, inset by `inset` of its size on each side. */
 function measure(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }, inset: number): Measure | null {
   const dx = inset * (box.right - box.left);
   const dy = inset * (box.bottom - box.top);
@@ -414,18 +428,32 @@ function measure(lum: Float32Array, pixels: Pixels, box: { left: number; top: nu
   let dark = 0;
   let sum = 0;
   let sumSquares = 0;
+  const rgb: Colour = [0, 0, 0];
   for (let y = y0; y < y1; y += 1) {
     for (let x = x0; x < x1; x += 1) {
-      const value = lum[y * pixels.width + x];
+      const at = y * pixels.width + x;
+      const value = lum[at];
       n += 1;
       sum += value;
       sumSquares += value * value;
       if (value < INK) dark += 1;
+      for (let channel = 0; channel < 3; channel += 1) rgb[channel] += pixels.data[at * 4 + channel];
     }
   }
   if (n === 0) return null;
   const brightness = sum / n;
-  return { ink: dark / n, brightness, spread: Math.sqrt(Math.max(0, sumSquares / n - brightness * brightness)) };
+  return {
+    ink: dark / n,
+    brightness,
+    spread: Math.sqrt(Math.max(0, sumSquares / n - brightness * brightness)),
+    colour: [rgb[0] / n, rgb[1] / n, rgb[2] / n],
+  };
+}
+
+function averageColour(colours: Colour[]): Colour | null {
+  if (colours.length === 0) return null;
+  const sum = colours.reduce<Colour>((total, [r, g, b]) => [total[0] + r, total[1] + g, total[2] + b], [0, 0, 0]);
+  return [sum[0] / colours.length, sum[1] / colours.length, sum[2] / colours.length];
 }
 
 /** Measures each square's interior and borders and calls it a blank letter square or something else. */
@@ -457,11 +485,17 @@ export function classifySquares(pixels: Pixels, grid: Grid): Square[] {
   }
   const sorted = measured.map((square) => square.brightness).toSorted((a, b) => a - b);
   const white = sorted[Math.floor(sorted.length * 0.9)] ?? 255;
-  const blank = (area: Measure) =>
-    area.ink < MAX_LETTER_INK && area.brightness >= white - MAX_LETTER_DIMMING && area.spread <= MAX_LETTER_SPREAD;
-  return measured.map(({ row, col, ink, brightness, spread, core, whole, sides, box }) => {
+  const plain = (area: Measure) => area.ink < MAX_LETTER_INK && area.spread <= MAX_LETTER_SPREAD;
+  const paperWhite = (area: Measure) => plain(area) && area.brightness >= white - MAX_LETTER_DIMMING;
+  const paper = averageColour(measured.filter(paperWhite).map((area) => chromaticity(area.colour)));
+  const tinted = (area: Measure) => {
+    const hue = chromaticity(area.colour);
+    return paper !== null && hue.some((value, channel) => Math.abs(value - paper[channel]) >= MIN_LETTER_TINT);
+  };
+  const blank = (area: Measure) => paperWhite(area) || (plain(area) && tinted(area));
+  return measured.map(({ row, col, ink, brightness, spread, colour, core, whole, sides, box }) => {
     const bordered = sides >= MIN_BORDERED_SIDES;
-    const empty = bordered && blank({ ink, brightness, spread });
+    const empty = bordered && blank({ ink, brightness, spread, colour });
     const marked = bordered && !empty && blank(core) && whole.ink < MAX_MARK_INK && !divided(lum, pixels, box);
     const rest = bordered && !empty && !marked ? pastStrip(lum, pixels, box) : null;
     const restMeasure = rest && measure(lum, pixels, rest, STRIP_INSET);
