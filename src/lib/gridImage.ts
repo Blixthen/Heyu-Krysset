@@ -106,6 +106,24 @@ const MAX_MARK_INK = 0.1;
 const DIVIDER_BAND = 0.3;
 /** Just inside the borders, so the printed lines themselves aren't counted as ink. */
 const EDGE_INSET = 0.1;
+/**
+ * Some letter squares carry a short clue in a strip along their top or bottom
+ * edge, ruled off by a line this far in (share of the square's height); the
+ * rest of the square, where the letter goes, is blank. Nearer the middle the
+ * line splits a clue square in two.
+ */
+const STRIP_MIN = 0.15;
+const STRIP_MAX = 0.45;
+/** Inset for measuring the part past a strip, keeping clear of the strip's line and any arrow on it. */
+const STRIP_INSET = 0.2;
+/**
+ * A strip's line runs from side border to side border, so it covers at least
+ * this share of the square's width; a row of clue text, which keeps clear of
+ * the borders, does not.
+ */
+const MIN_STRIP_LINE_COVER = 0.9;
+/** How far (px) above and below a strip line's row to look for its pixels. */
+const STRIP_LINE_REACH = 2;
 /** A square cut off by the photo's edge is still read when at least this share of it is in the photo. */
 const MIN_EDGE_SHARE = 0.6;
 
@@ -339,6 +357,40 @@ function divided(lum: Float32Array, pixels: Pixels, box: { left: number; top: nu
   return false;
 }
 
+/**
+ * The part of the square past a clue strip along its top or bottom edge, or
+ * null if there is no such strip.
+ */
+function pastStrip(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }) {
+  const height = box.bottom - box.top;
+  for (let offset = Math.round(STRIP_MIN * height); offset <= STRIP_MAX * height; offset += 1) {
+    const top = box.top + offset;
+    if (stripLineCover(lum, pixels, top, box.left, box.right) >= MIN_STRIP_LINE_COVER) return { ...box, top };
+    const bottom = box.bottom - offset;
+    if (stripLineCover(lum, pixels, bottom, box.left, box.right) >= MIN_STRIP_LINE_COVER) return { ...box, bottom };
+  }
+  return null;
+}
+
+/** Share of the square's width, just inside its side borders, that a horizontal line at `y` covers. */
+function stripLineCover(lum: Float32Array, pixels: Pixels, y: number, left: number, right: number) {
+  const margin = BORDER_REACH + 1;
+  let samples = 0;
+  let hits = 0;
+  for (let x = Math.round(left + margin); x <= right - margin; x += 1) {
+    if (x < 0 || x >= pixels.width) continue;
+    samples += 1;
+    for (let d = -STRIP_LINE_REACH; d <= STRIP_LINE_REACH; d += 1) {
+      const yy = Math.round(y + d);
+      if (yy >= 0 && yy < pixels.height && onLine(lum, pixels.width, x, yy, false, pixels.height)) {
+        hits += 1;
+        break;
+      }
+    }
+  }
+  return samples === 0 ? 0 : hits / samples;
+}
+
 function borderedSides(lum: Float32Array, pixels: Pixels, left: number, top: number, right: number, bottom: number) {
   return [
     borderCover(lum, pixels, left, top, bottom, true),
@@ -411,7 +463,10 @@ export function classifySquares(pixels: Pixels, grid: Grid): Square[] {
     const bordered = sides >= MIN_BORDERED_SIDES;
     const empty = bordered && blank({ ink, brightness, spread });
     const marked = bordered && !empty && blank(core) && whole.ink < MAX_MARK_INK && !divided(lum, pixels, box);
-    return { row, col, kind: empty || marked ? "letter" : "other", marked, ink, brightness, spread };
+    const rest = bordered && !empty && !marked ? pastStrip(lum, pixels, box) : null;
+    const restMeasure = rest && measure(lum, pixels, rest, STRIP_INSET);
+    const stripped = restMeasure !== null && blank(restMeasure);
+    return { row, col, kind: empty || marked || stripped ? "letter" : "other", marked: marked || stripped, ink, brightness, spread };
   });
 }
 

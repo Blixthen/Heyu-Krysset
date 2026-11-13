@@ -59,6 +59,13 @@ const split: Painter = (page, left, top) => {
   page.fill(left + 13, top + 7, 14, 2, 30);
   page.fill(left + 13, top + 32, 14, 2, 30);
 };
+/** A letter square with a short clue in a strip along its top, ruled off by a line to the side borders. */
+const strip: Painter = (page, left, top) => {
+  page.fill(left, top + 10, SIZE, 1, 30);
+  page.fill(left + 10, top + 4, 20, 3, 30);
+};
+/** A clue square with one short word near its top and no line: the word must not pass for a strip's line. */
+const word: Painter = (page, left, top) => page.fill(left + 8, top + 12, 24, 2, 30);
 const grey: Painter = (page, left, top) => page.fill(left + 1, top + 1, SIZE - 1, SIZE - 1, 200);
 
 /** A plain white area of a photograph (like a wall) over a block of squares: blank, but no grid lines. */
@@ -118,7 +125,9 @@ describe("classifySquares", () => {
       .paint(5, 1, text)
       .paint(5, 2, arrow)
       .paint(5, 3, split)
-      .paint(5, 4, grey);
+      .paint(5, 4, grey)
+      .paint(6, 1, strip)
+      .paint(6, 2, word);
     picture(page, 3, 4);
     whiteArea(page, 3, 5, 3);
     const kind = kinds(page.pixels());
@@ -127,6 +136,8 @@ describe("classifySquares", () => {
     expect(kind(5, 2)).toBe("marked");
     expect(kind(5, 3)).toBe("other");
     expect(kind(5, 4)).toBe("other");
+    expect(kind(6, 1)).toBe("marked");
+    expect(kind(6, 2)).toBe("other");
     expect(kind(1, 1)).toBe("other");
     expect(kind(1, 6)).toBe("letter");
     expect(kind(4, 6)).toBe("other");
