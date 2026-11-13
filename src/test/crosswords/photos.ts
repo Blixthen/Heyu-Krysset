@@ -171,7 +171,7 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     description: "fireplace screenshot, cropped at the grid's left and bottom edges",
     minCells: 150,
     // The first two letter points are cut off by the photo's edge: bottom left, and bottom right beside the grey block.
-    // The image reading finds both; knownProblems is only Gemini's recorded reply, which misses the first.
+    // The image reading finds both; knownProblems lists only what Gemini's recorded reply gets wrong.
     letterPoints: [[29, 977], [912, 977], [737, 171], [675, 266], [206, 503], [970, 456], [29, 740], [499, 833], [853, 740]],
     cluePoints: [[675, 142], [324, 456], [29, 552], [559, 882], [970, 977], [242, 195], [29, 456], [794, 977]],
     knownProblems: [
