@@ -1,6 +1,6 @@
 "use client";
 
-import { boardReducer, emptyBoard, type BoardAction } from "@/lib/board";
+import { boardReducer, emptyBoard, restoreAddsToRoom, type BoardAction } from "@/lib/board";
 import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, toChatMessage, type ChatMessage } from "@/lib/chat";
 import {
   authorsFromPayload,
@@ -16,9 +16,11 @@ import {
 } from "@/lib/crossword";
 import { isPlayerName, onlineNames, sameNames } from "@/lib/players";
 import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
+import type { SavedLetters } from "@/lib/storedLetters";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+import { useLetterSaving } from "./useLetterSaving";
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 
 export type RoomStatus = "connecting" | "live" | "error" | "unconfigured";
@@ -82,6 +84,8 @@ export function useCrosswordRoom(nickname: string) {
     dispatch(action);
     return boardRef.current;
   }, []);
+  const latestBoard = useCallback(() => boardRef.current, []);
+  const saveLettersSoon = useLetterSaving(latestBoard);
   const [generation, setGeneration] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -333,17 +337,18 @@ export function useCrosswordRoom(nickname: string) {
   );
 
   /**
-   * Opens a stored puzzle as if a peer had shared it, so the room's usual
-   * rules apply: it joins the same puzzle, fills an empty room, and gives way
-   * to a newer puzzle the room already has. Shares it only if it is new to
-   * the room; peers on the same puzzle have it already.
+   * Opens a stored puzzle and its saved letters as if a peer had shared them,
+   * so the room's usual rules apply: it joins the same puzzle (merging the
+   * letters, ours winning), fills an empty room, and gives way to a newer
+   * puzzle the room already has. Shares the board only if that gave the room
+   * something new: the puzzle, or letters nobody here had.
    */
   const restorePuzzle = useCallback(
-    (puzzle: CrosswordPuzzle) => {
-      const had = boardRef.current.puzzle?.id === puzzle.id;
-      const next = apply({ type: "remote-puzzle", puzzle, letters: {}, authors: {} });
+    (puzzle: CrosswordPuzzle, saved: SavedLetters = { letters: {}, authors: {} }) => {
+      const before = boardRef.current;
+      const next = apply({ type: "remote-puzzle", puzzle, letters: saved.letters, authors: saved.authors });
       const channel = channelRef.current;
-      if (channel && !had && next.puzzle?.id === puzzle.id) void broadcastPuzzle(channel, next.puzzle, next.letters, next.authors);
+      if (channel && next.puzzle && restoreAddsToRoom(before, next, puzzle.id)) void broadcastPuzzle(channel, next.puzzle, next.letters, next.authors);
     },
     [apply, broadcastPuzzle],
   );
@@ -357,8 +362,9 @@ export function useCrosswordRoom(nickname: string) {
       const update: CellUpdate = { puzzleId, row, col, value: oneLetter(value), author };
       apply({ type: "letter", ...update });
       void channelRef.current?.send({ type: "broadcast", event: "cell-update", payload: update });
+      saveLettersSoon();
     },
-    [apply, puzzleId, nickname],
+    [apply, puzzleId, nickname, saveLettersSoon],
   );
 
   const configStatus: RoomStatus | null = isSecretSupabaseKey

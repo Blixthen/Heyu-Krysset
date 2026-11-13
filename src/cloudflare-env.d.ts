@@ -17,11 +17,13 @@ interface PhotoBucketPutOptions {
 interface PhotoBucket {
   put(key: string, value: ArrayBuffer | Uint8Array, options?: PhotoBucketPutOptions): Promise<object | null>;
   get(key: string): Promise<PhotoBucketObject | null>;
+  /** The object's metadata without its body, or null if there is none. */
+  head(key: string): Promise<object | null>;
 }
 
 declare global {
   interface CloudflareEnv {
-    /** The R2 bucket "heyu" (wrangler.jsonc): photos and stored puzzles. */
+    /** The R2 bucket "heyu" (wrangler.jsonc): photos, stored puzzles and their letters. */
     PHOTOS?: PhotoBucket;
   }
 }

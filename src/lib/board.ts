@@ -91,3 +91,17 @@ export function boardReducer(state: Board, action: BoardAction): Board {
     }
   }
 }
+
+function filledCount(letters: Letters) {
+  return Object.values(letters).filter(Boolean).length;
+}
+
+/**
+ * Whether opening a stored puzzle (and its saved letters) gave the room
+ * something to share: the puzzle itself, if it took the board, or letters
+ * nobody here had. Not if a newer puzzle kept the board.
+ */
+export function restoreAddsToRoom(before: Board, after: Board, puzzleId: string) {
+  if (after.puzzle?.id !== puzzleId) return false;
+  return before.puzzle?.id !== puzzleId || filledCount(after.letters) > filledCount(before.letters);
+}
