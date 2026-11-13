@@ -133,6 +133,21 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
       "clue area at (570, 86) read as letter square (0,0)",
     ],
   },
+  {
+    name: "ljuset",
+    description: "two people, phone photo, clue strips across letter squares",
+    minCells: 100,
+    // Includes three letter squares with a clue strip along the top (FRIDEN, UTHUS, SES DEMONSTRERA).
+    letterPoints: [[536, 368], [536, 481], [817, 43], [111, 418], [678, 87], [606, 87], [889, 966], [533, 910], [44, 582], [961, 195], [389, 362]],
+    cluePoints: [[676, 199], [606, 529], [394, 745], [750, 747], [278, 173], [211, 867], [183, 475], [467, 362], [889, 418], [958, 964], [889, 39], [533, 689]],
+    knownProblems: [
+      "letter square at (536, 368) not found",
+      "letter square at (817, 43) not found",
+      "letter square at (44, 582) not found",
+      "letter square at (389, 362) not found",
+      "clue area at (183, 475) read as letter square (7,1)",
+    ],
+  },
 ];
 
 const DIRECTORY = fileURLToPath(new URL(".", import.meta.url));
