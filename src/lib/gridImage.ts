@@ -399,13 +399,19 @@ function stripLineCover(lum: Float32Array, pixels: Pixels, y: number, left: numb
   return samples === 0 ? 0 : hits / samples;
 }
 
+/**
+ * How many sides have a printed border. A side on the photo's edge counts:
+ * the crop cut its line off, and a corner square would otherwise lose two.
+ */
 function borderedSides(lum: Float32Array, pixels: Pixels, left: number, top: number, right: number, bottom: number) {
+  const { width, height } = pixels;
+  const cut = (at: number, length: number) => at <= BORDER_REACH || at >= length - BORDER_REACH;
   return [
-    borderCover(lum, pixels, left, top, bottom, true),
-    borderCover(lum, pixels, right, top, bottom, true),
-    borderCover(lum, pixels, top, left, right, false),
-    borderCover(lum, pixels, bottom, left, right, false),
-  ].filter((cover) => cover >= MIN_BORDER_COVER).length;
+    cut(left, width) || borderCover(lum, pixels, left, top, bottom, true) >= MIN_BORDER_COVER,
+    cut(right, width) || borderCover(lum, pixels, right, top, bottom, true) >= MIN_BORDER_COVER,
+    cut(top, height) || borderCover(lum, pixels, top, left, right, false) >= MIN_BORDER_COVER,
+    cut(bottom, height) || borderCover(lum, pixels, bottom, left, right, false) >= MIN_BORDER_COVER,
+  ].filter(Boolean).length;
 }
 
 type Colour = [r: number, g: number, b: number];

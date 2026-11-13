@@ -166,6 +166,20 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
       "clue area at (199, 769) read as letter square (13,1)",
     ],
   },
+  {
+    name: "brasan",
+    description: "fireplace screenshot, cropped at the grid's left and bottom edges",
+    minCells: 150,
+    // The first two letter points are cut off by the photo's edge: bottom left, and bottom right beside the grey block.
+    letterPoints: [[29, 977], [912, 977], [737, 171], [675, 266], [206, 503], [970, 456], [29, 740], [499, 833], [853, 740]],
+    cluePoints: [[675, 142], [324, 456], [29, 552], [559, 882], [970, 977], [242, 195], [29, 456], [794, 977]],
+    knownProblems: [
+      "letter square at (29, 977) not found",
+      "letter square at (970, 456) not found",
+      "letter square at (499, 833) not found",
+      "clue area at (559, 882) read as letter square (15,7)",
+    ],
+  },
 ];
 
 const DIRECTORY = fileURLToPath(new URL(".", import.meta.url));

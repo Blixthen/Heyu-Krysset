@@ -181,6 +181,20 @@ describe("classifySquares", () => {
     const kind = kinds(new Page(20, croppedHeight).pixels());
     expect(kind(COUNT - 1, 3)).toBe("letter");
   });
+
+  it("reads a corner square cut off by the photo's left and bottom edges, but not a clue square there", () => {
+    const croppedHeight = MARGIN + (COUNT - 1) * SIZE + Math.round(SIZE * 0.75);
+    const page = new Page(20, croppedHeight).paint(COUNT - 2, 0, text).pixels();
+    // Drop the margin and the left line, so the first column has no left border either.
+    const cut = MARGIN + LINE + 2;
+    const width = page.width - cut;
+    const data = new Uint8ClampedArray(width * page.height * 4);
+    for (let y = 0; y < page.height; y += 1) {
+      data.set(page.data.subarray((y * page.width + cut) * 4, (y * page.width + page.width) * 4), y * width * 4);
+    }
+    const kind = kinds({ width, height: page.height, data });
+    expect([kind(COUNT - 1, 0), kind(COUNT - 2, 0), kind(COUNT - 1, 1)]).toEqual(["letter", "other", "letter"]);
+  });
 });
 
 describe("toLetterCells", () => {
