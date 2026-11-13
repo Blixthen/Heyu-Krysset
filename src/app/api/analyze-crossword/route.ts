@@ -1,107 +1,85 @@
 import {
-  AnalyzeError,
-  ANALYZE_PROMPT,
-  ANALYZE_RESPONSE_SCHEMA,
-  extractJsonObject,
+  buildGenerateRequest,
+  describeReply,
+  interpretReply,
   parseAnalyzeRequest,
-  parseCells,
+  type AnalyzeFailure,
+  type ModelReply,
 } from "@/lib/analyze";
-import { FinishReason, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 60;
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
-/** MAX_CELLS (2000) tuples at ~15 tokens each fit with headroom. */
-const MAX_OUTPUT_TOKENS = 32_768;
-const LOG_TAIL_LENGTH = 200;
+/** Below maxDuration (60 s), leaving time to parse the reply and respond. */
+const GEMINI_TIMEOUT_MS = 55_000;
+/** No retries: a second attempt would not fit inside maxDuration. */
+const GEMINI_ATTEMPTS = 1;
 
-/** What we know about Gemini's reply; logged when it cannot be used. Never includes the image. */
-type ModelDiagnostics = {
-  model: string;
-  finishReason?: string;
-  outputTokens?: number;
-  textLength?: number;
-  textTail?: string;
-};
+/** Shown for any failure whose details must stay server-side. */
+const GENERIC_FAILURE: AnalyzeFailure = { message: "Kunde inte tolka korsordet. Försök igen.", status: 502 };
 
-function describeResponse(model: string, response: GenerateContentResponse, text: string | undefined): ModelDiagnostics {
+function failureResponse({ message, status }: AnalyzeFailure) {
+  return NextResponse.json({ error: message }, { status });
+}
+
+/** Reads the SDK's `text` getter exactly once. */
+function toModelReply(response: GenerateContentResponse): ModelReply {
   return {
-    model,
+    text: response.text?.trim() ?? "",
     finishReason: response.candidates?.[0]?.finishReason,
     outputTokens: response.usageMetadata?.candidatesTokenCount,
-    textLength: text?.length ?? 0,
-    textTail: text?.slice(-LOG_TAIL_LENGTH),
   };
 }
 
-function errorResponse(
-  error: unknown,
-  fallback: { message: string; status: number },
-  diagnostics?: ModelDiagnostics,
-) {
-  if (error instanceof AnalyzeError) {
-    // Server-side failures (bad model output) are logged so every 502 has a
-    // matching explanation; client mistakes (4xx) are not worth the noise.
-    if (error.status >= 500) console.warn("analyze-crossword rejected model output", error.message, diagnostics);
-    return NextResponse.json({ error: error.message }, { status: error.status });
+async function readBody(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch (error) {
+    // Only the error name: a JSON parse message can quote part of the image.
+    console.warn("analyze-crossword: unreadable request body", error instanceof Error ? error.name : typeof error);
+    return null;
   }
-  // Unknown errors (SDK, network, quota) are logged server-side only; their
-  // messages can contain internal details we do not want to show users.
-  console.error("analyze-crossword failed", error, diagnostics);
-  return NextResponse.json({ error: fallback.message }, { status: fallback.status });
 }
 
+/** Imperative shell: reads env and the body, calls Gemini, logs, responds. All decisions live in @/lib/analyze. */
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("analyze-crossword: GEMINI_API_KEY is not set");
-    return NextResponse.json({ error: "Bildtolkningen är inte konfigurerad." }, { status: 500 });
+    return failureResponse({ message: "Bildtolkningen är inte konfigurerad.", status: 500 });
   }
 
-  let input: { image: string; mimeType: string };
-  try {
-    input = parseAnalyzeRequest(await request.json());
-  } catch (error) {
-    return errorResponse(error, { message: "Ogiltig begäran.", status: 400 });
-  }
+  const input = parseAnalyzeRequest(await readBody(request));
+  if (!input.ok) return failureResponse(input.error);
 
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  let diagnostics: ModelDiagnostics = { model };
+  let reply: ModelReply;
   try {
     const ai = new GoogleGenAI({
       apiKey,
-      httpOptions: {
-        apiVersion: "v1beta",
-        timeout: 55_000,
-        retryOptions: { attempts: 1 },
-      },
+      httpOptions: { apiVersion: "v1beta", timeout: GEMINI_TIMEOUT_MS, retryOptions: { attempts: GEMINI_ATTEMPTS } },
     });
-    const response = await ai.models.generateContent({
-      model,
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: ANALYZE_PROMPT }, { inlineData: { mimeType: input.mimeType, data: input.image } }],
-        },
-      ],
-      config: {
-        temperature: 0,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-        responseMimeType: "application/json",
-        responseSchema: ANALYZE_RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    });
-
-    const text = response.text?.trim();
-    diagnostics = describeResponse(model, response, text);
-    if (diagnostics.finishReason === FinishReason.MAX_TOKENS) {
-      throw new AnalyzeError("Korsordet var för stort för att tolkas. Prova att fotografera en del i taget.");
-    }
-    if (!text) throw new AnalyzeError("Gemini returnerade inget svar.");
-    return NextResponse.json({ cells: parseCells(extractJsonObject(text)) });
+    reply = toModelReply(await ai.models.generateContent(buildGenerateRequest(model, input.value)));
   } catch (error) {
-    return errorResponse(error, { message: "Kunde inte tolka korsordet. Försök igen.", status: 502 }, diagnostics);
+    // SDK, network and quota errors can contain internal details (keys,
+    // project ids), so they are logged here and never sent to the user.
+    console.error("analyze-crossword: Gemini request failed", { model }, error);
+    return failureResponse(GENERIC_FAILURE);
+  }
+
+  const diagnostics = { model, ...describeReply(reply) };
+  try {
+    const result = interpretReply(reply);
+    if (!result.ok) {
+      console.warn("analyze-crossword: rejected model output", result.error.message, diagnostics);
+      return failureResponse(result.error);
+    }
+    return NextResponse.json({ cells: result.value });
+  } catch (error) {
+    // interpretReply returns expected failures; a throw here is a bug, so keep the safe 502.
+    console.error("analyze-crossword: could not interpret reply", diagnostics, error);
+    return failureResponse(GENERIC_FAILURE);
   }
 }

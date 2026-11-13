@@ -46,7 +46,7 @@ There is no database and no server-side room state. The server does three things
 
 **Untrusted payloads.** Every peer payload is validated and copied field by field before use (`isChatMessage`/`toChatMessage` in `src/lib/chat.ts`, `isCrosswordPuzzle`/`toCrosswordPuzzle`/`isCellUpdate` in `src/lib/crossword.ts`). The same crossword validators check Gemini's output on the server, so that module must stay runtime-agnostic.
 
-**Photo flow.** `src/lib/image.ts` makes two JPEGs in the browser: a larger one for Gemini and a smaller one, under `SHARE_IMAGE_BUDGET`, to broadcast, because Supabase limits broadcast payload size. `/api/analyze-crossword` sends the photo and `ANALYZE_PROMPT` (`src/lib/analyze.ts`) to Gemini and returns validated letter cells in 0–1000 coordinates relative to the image. Only `AnalyzeError` messages reach users; other errors are logged.
+**Photo flow.** `src/lib/image.ts` makes two JPEGs in the browser: a larger one for Gemini and a smaller one, under `SHARE_IMAGE_BUDGET`, to broadcast, because Supabase limits broadcast payload size. `/api/analyze-crossword` sends the photo and `ANALYZE_PROMPT` (`src/lib/analyze.ts`) to Gemini and returns validated letter cells in 0–1000 coordinates relative to the image. The decisions (request validation, the Gemini request, interpreting the reply) are pure functions in `src/lib/analyze.ts` that return a `Result`; the route only calls Gemini, logs and responds. Only `AnalyzeFailure` messages reach users; SDK errors and rejected model output are logged.
 
 ## Cloudflare Workers constraints
 
@@ -74,7 +74,9 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 - Validate `unknown` input (request bodies, peer payloads, Gemini output) with a type guard before use. Casting is only for reading fields while narrowing, never for treating unvalidated data as the target type.
 - In app code, don't silence the type checker with `as unknown as`, `@ts-expect-error`, or non-null `!`; fix the type at its source.
 - Name limits and timings as constants with a comment explaining the value (`MAX_MESSAGES`, `SHARE_IMAGE_BUDGET`, `SYNC_JITTER_MS`).
-- Keep state transitions pure and testable in `src/lib/`; hooks and components wire them to React and the network.
+- Functional core, imperative shell: keep logic (state transitions, parsing, validation, decisions) in pure functions in `src/lib/` that take and return plain data, with no I/O, logging, `process.env`, clocks or randomness. Route handlers, hooks and components stay thin: gather inputs, call the core, act on the result.
+- Return expected failures as values (`{ ok: true, value } | { ok: false, error }`, like `Result` in `src/lib/analyze.ts`), not thrown exceptions. Throwing is for effects that really fail, such as a network call.
+- Test the pure core directly with plain inputs and no mocks; shell tests only cover the wiring.
 - Before writing a helper, look for an existing one in `src/lib/`.
 - User-facing text is Swedish and written for friends, not formal.
 
@@ -89,7 +91,7 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 
 - **Fail closed.** A missing `APP_PASSWORD` or an unreadable cookie means locked, never open.
 - **Bound everything a caller controls**: message length, list sizes, cell counts, image size (`MAX_MESSAGE_LENGTH`, `MAX_MESSAGES`, `MAX_CELLS`, `MAX_IMAGE_BASE64_LENGTH`).
-- **Never show raw errors** from Gemini, Supabase or the runtime to users. Log them and show a generic Swedish message; throw `AnalyzeError` only for messages that are safe to show.
+- **Never show raw errors** from Gemini, Supabase or the runtime to users. Log them and show a generic Swedish message; only put messages that are safe to show in an `AnalyzeFailure`.
 - **Secrets stay server-side.** Only `NEXT_PUBLIC_*` values reach the browser, and the Supabase key must be the publishable one. Anything derived from `APP_PASSWORD` must not be prerendered into build output.
 
 ## Compatibility
