@@ -105,6 +105,40 @@ async function askGemini(images: Upload): Promise<LetterCell[]> {
   throw new UploadError(typeof error === "string" ? error : "Kunde inte tolka bilden.");
 }
 
+/**
+ * Saves the puzzle behind its permanent link. Best effort: the room works
+ * without it, only the link won't open the puzzle once everyone has left.
+ */
+export async function savePuzzle(puzzle: CrosswordPuzzle): Promise<boolean> {
+  try {
+    const response = await fetch("/api/puzzle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(puzzle),
+      signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+    });
+    if (response.ok) return true;
+    console.warn("Saving the puzzle failed", response.status);
+  } catch (error) {
+    console.warn("Saving the puzzle failed", error);
+  }
+  return false;
+}
+
+/**
+ * Saves a shared puzzle behind its link straight away, since the address bar
+ * shows the link at once, then stores the photo and saves the puzzle again
+ * with its id (the only change a second save may make).
+ */
+async function keepPuzzle(puzzle: CrosswordPuzzle, file: File, onPhoto?: (puzzleId: string, photo: string) => void) {
+  const saved = savePuzzle(puzzle);
+  const photo = await storePhoto(file);
+  if (!photo) return;
+  onPhoto?.(puzzle.id, photo);
+  await saved;
+  await savePuzzle({ ...puzzle, photo });
+}
+
 export function PuzzleUploader({
   compact = false,
   onPuzzle,
@@ -129,9 +163,7 @@ export function PuzzleUploader({
     try {
       const puzzle = await analyzeCrossword(file);
       onPuzzle(puzzle);
-      void storePhoto(file).then((photo) => {
-        if (photo) onPhoto?.(puzzle.id, photo);
-      });
+      void keepPuzzle(puzzle, file, onPhoto);
     } catch (failure) {
       if (!(failure instanceof UploadError)) console.error(failure);
       setError(failure instanceof UploadError ? failure.message : "Något gick fel. Försök igen.");

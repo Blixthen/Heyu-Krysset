@@ -1,6 +1,6 @@
 "use client";
 
-import { boardReducer, emptyBoard } from "@/lib/board";
+import { boardReducer, emptyBoard, type BoardAction } from "@/lib/board";
 import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, toChatMessage, type ChatMessage } from "@/lib/chat";
 import {
   authorsFromPayload,
@@ -72,6 +72,16 @@ export function useCrosswordRoom(nickname: string) {
   const [reactions, setReactions] = useState<Reactions>(() => new Map());
   const [online, setOnline] = useState<string[]>([]);
   const [board, dispatch] = useReducer(boardReducer, emptyBoard);
+  // The board as of the latest action, not the latest render: callbacks that
+  // run between an action and its render (a link loading as a peer's update
+  // lands, an uploader calling back seconds later) must see it. The reducer
+  // is pure, so running it here too gives the same board React will render.
+  const boardRef = useRef(emptyBoard);
+  const apply = useCallback((action: BoardAction) => {
+    boardRef.current = boardReducer(boardRef.current, action);
+    dispatch(action);
+    return boardRef.current;
+  }, []);
   const [generation, setGeneration] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -191,7 +201,7 @@ export function useCrosswordRoom(nickname: string) {
           const puzzle = toCrosswordPuzzle(candidate);
           // Someone else answered a sync request for our puzzle; no need for us to.
           if (readBoard().puzzle?.id === puzzle.id) window.clearTimeout(syncTimer);
-          dispatch({
+          apply({
             type: "remote-puzzle",
             puzzle,
             letters: lettersFromPayload((payload as { letters?: unknown }).letters, puzzle.cells),
@@ -201,7 +211,7 @@ export function useCrosswordRoom(nickname: string) {
         .on("broadcast", { event: "cell-update" }, ({ payload }) => {
           if (!isCellUpdate(payload)) return;
           const { puzzleId, row, col, value, author } = payload;
-          dispatch({ type: "letter", puzzleId, row, col, value, author });
+          apply({ type: "letter", puzzleId, row, col, value, author });
         })
         .on("broadcast", { event: "sync-request" }, () => {
           if (!readBoard().puzzle) return;
@@ -248,7 +258,7 @@ export function useCrosswordRoom(nickname: string) {
       channelRef.current = null;
       if (current) void client.removeChannel(current);
     };
-  }, [broadcastPuzzle, clientId, generation]);
+  }, [apply, broadcastPuzzle, clientId, generation]);
 
   const reconnect = useCallback(() => {
     setStatus("connecting");
@@ -299,34 +309,43 @@ export function useCrosswordRoom(nickname: string) {
 
   const publishPuzzle = useCallback(
     (puzzle: CrosswordPuzzle) => {
-      dispatch({ type: "load", puzzle });
+      apply({ type: "load", puzzle });
       setShareError("");
       // If we are offline, the puzzle is shared when the channel subscribes.
       const channel = channelRef.current;
       if (channel) void broadcastPuzzle(channel, puzzle, {}, {});
     },
-    [broadcastPuzzle],
+    [apply, broadcastPuzzle],
   );
-
-  // The uploader reports the stored photo seconds after sharing the puzzle,
-  // from a callback made back then, so read the board as it is now.
-  const boardRef = useRef(board);
-  useEffect(() => {
-    boardRef.current = board;
-  }, [board]);
 
   const attachPhoto = useCallback(
     (puzzleId: string, photo: string) => {
       const { puzzle, letters, authors } = boardRef.current;
       // A newer puzzle replaced this one meanwhile, or it has its photo already.
       if (!puzzle || puzzle.id !== puzzleId || puzzle.photo !== undefined) return;
-      dispatch({ type: "photo", puzzleId, photo });
+      apply({ type: "photo", puzzleId, photo });
       // Peers take the photo from a full board for the same puzzle. If we are
       // offline, it goes out with the board when the channel subscribes.
       const channel = channelRef.current;
       if (channel) void broadcastPuzzle(channel, { ...puzzle, photo }, letters, authors);
     },
-    [broadcastPuzzle],
+    [apply, broadcastPuzzle],
+  );
+
+  /**
+   * Opens a stored puzzle as if a peer had shared it, so the room's usual
+   * rules apply: it joins the same puzzle, fills an empty room, and gives way
+   * to a newer puzzle the room already has. Shares it only if it is new to
+   * the room; peers on the same puzzle have it already.
+   */
+  const restorePuzzle = useCallback(
+    (puzzle: CrosswordPuzzle) => {
+      const had = boardRef.current.puzzle?.id === puzzle.id;
+      const next = apply({ type: "remote-puzzle", puzzle, letters: {}, authors: {} });
+      const channel = channelRef.current;
+      if (channel && !had && next.puzzle?.id === puzzle.id) void broadcastPuzzle(channel, next.puzzle, next.letters, next.authors);
+    },
+    [apply, broadcastPuzzle],
   );
 
   const puzzleId = board.puzzle?.id;
@@ -336,10 +355,10 @@ export function useCrosswordRoom(nickname: string) {
       // A peer drops an update whose author fails validation, so leave a bad nickname out.
       const author = isPlayerName(nickname) ? nickname : undefined;
       const update: CellUpdate = { puzzleId, row, col, value: oneLetter(value), author };
-      dispatch({ type: "letter", ...update });
+      apply({ type: "letter", ...update });
       void channelRef.current?.send({ type: "broadcast", event: "cell-update", payload: update });
     },
-    [puzzleId, nickname],
+    [apply, puzzleId, nickname],
   );
 
   const configStatus: RoomStatus | null = isSecretSupabaseKey
@@ -363,6 +382,7 @@ export function useCrosswordRoom(nickname: string) {
     sendMessage,
     publishPuzzle,
     attachPhoto,
+    restorePuzzle,
     setLetter,
   };
 }

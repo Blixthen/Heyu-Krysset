@@ -1,4 +1,5 @@
 import { AuthCard, inputClassName, primaryButtonClassName } from "@/components/AuthCard";
+import { safeNextPath } from "@/lib/storedPuzzle";
 import { Suspense } from "react";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -18,6 +19,7 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
         </label>
         <Suspense fallback={null}>
           <LoginError searchParams={searchParams} />
+          <NextPath searchParams={searchParams} />
         </Suspense>
         <button type="submit" className={primaryButtonClassName}>
           Öppna
@@ -30,4 +32,10 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
 async function LoginError({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
   const { error } = await searchParams;
   return error ? <p className="text-sm text-rose-300">Fel lösenord. Försök igen.</p> : null;
+}
+
+/** Carries a puzzle link through the login (checked again by /api/unlock). */
+async function NextPath({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
+  const next = safeNextPath((await searchParams).next);
+  return next === "/" ? null : <input type="hidden" name="next" value={next} />;
 }

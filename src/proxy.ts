@@ -1,4 +1,5 @@
 import { GATE_COOKIE, hasValidGateCookie } from "@/lib/gate";
+import { safeNextPath } from "@/lib/storedPuzzle";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = new Set(["/login", "/api/unlock"]);
@@ -9,7 +10,7 @@ export function proxy(request: NextRequest) {
 
   if (PUBLIC_PATHS.has(pathname)) {
     if (pathname === "/login" && allowed) {
-      return NextResponse.redirect(new URL("/", request.url));
+      return NextResponse.redirect(new URL(safeNextPath(request.nextUrl.searchParams.get("next")), request.url));
     }
     return NextResponse.next();
   }
@@ -20,7 +21,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Lösenord krävs." }, { status: 401 });
   }
 
-  return NextResponse.redirect(new URL("/login", request.url));
+  // A puzzle link survives the login, so friends can open one they were sent.
+  const login = new URL("/login", request.url);
+  const next = safeNextPath(pathname);
+  if (next !== "/") login.searchParams.set("next", next);
+  return NextResponse.redirect(login);
 }
 
 export const config = {

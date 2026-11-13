@@ -21,8 +21,21 @@ describe("proxy", () => {
     expect(response.headers.get("location")).toBe("https://kryss.test/login");
   });
 
+  it("keeps a puzzle link through the login, but nothing else", () => {
+    const id = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+    expect(proxy(request(`/p/${id}`)).headers.get("location")).toBe(`https://kryss.test/login?next=%2Fp%2F${id}`);
+    expect(proxy(request("/p/not-a-puzzle")).headers.get("location")).toBe("https://kryss.test/login");
+  });
+
+  it("sends a logged-in visitor on /login to the puzzle link they came for", () => {
+    const id = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+    const cookie = gateToken(PASSWORD);
+    expect(proxy(request(`/login?next=/p/${id}`, cookie)).headers.get("location")).toBe(`https://kryss.test/p/${id}`);
+    expect(proxy(request("/login?next=//evil.example", cookie)).headers.get("location")).toBe("https://kryss.test/");
+  });
+
   it("answers locked API calls with 401 JSON", async () => {
-    for (const path of ["/api/room", "/api/analyze-crossword"]) {
+    for (const path of ["/api/room", "/api/analyze-crossword", "/api/photo", "/api/puzzle", "/api/puzzle/3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c"]) {
       const response = proxy(request(path));
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: "Lösenord krävs." });

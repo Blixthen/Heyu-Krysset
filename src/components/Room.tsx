@@ -1,6 +1,7 @@
 "use client";
 
 import { useCrosswordRoom } from "@/hooks/useCrosswordRoom";
+import { useLinkedPuzzle } from "@/hooks/useLinkedPuzzle";
 import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
 import { playerColours } from "@/lib/players";
@@ -11,10 +12,20 @@ import { CrosswordGrid, focusCell } from "./CrosswordGrid";
 import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
 import { PuzzleUploader } from "./PuzzleUploader";
 
-export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => void }) {
+export function Room({
+  nickname,
+  linkedPuzzleId,
+  onLeave,
+}: {
+  nickname: string;
+  /** A stored puzzle to open, from a permanent link. */
+  linkedPuzzleId?: string;
+  onLeave: () => void;
+}) {
   const room = useCrosswordRoom(nickname);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
   const { puzzle, letters, authors } = room.board;
+  const link = useLinkedPuzzle(linkedPuzzleId, puzzle?.id, room.restorePuzzle);
   // Everyone in the room gets a colour as soon as presence lists them, from
   // the same names in every tab; typists keep theirs whoever comes and goes.
   const { online } = room;
@@ -34,6 +45,8 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
   }
 
   function onPuzzle(next: CrosswordPuzzle) {
+    // Whatever puzzle the user picks now, the link's is no longer the point.
+    link.dismiss();
     room.publishPuzzle(next);
     const first = next.cells[0];
     setSelectedCell(first ? { row: first.row, col: first.col } : null);
@@ -75,6 +88,25 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
         </div>
       </header>
 
+      {link.error ? (
+        <p className="shrink-0 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">{link.error}</p>
+      ) : null}
+      {link.elsewhere ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">
+          <p>Rummet har ett annat korsord än det i länken.</p>
+          <button
+            type="button"
+            // Shared as the newest, so it wins in every tab; like a new upload, it starts without letters.
+            onClick={() => link.elsewhere && onPuzzle({ ...link.elsewhere, createdAt: Date.now() })}
+            className="font-bold text-amber-200 underline underline-offset-2 hover:text-white"
+          >
+            Öppna länkens korsord
+          </button>
+          <button type="button" onClick={link.dismiss} className="text-slate-400 hover:text-white">
+            Stäng
+          </button>
+        </div>
+      ) : null}
       {room.shareError ? (
         <p className="shrink-0 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">{room.shareError}</p>
       ) : null}

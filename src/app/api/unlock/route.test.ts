@@ -4,9 +4,10 @@ import { POST } from "./route";
 
 const PASSWORD = "hemligt";
 
-function unlock(password?: string) {
+function unlock(password?: string, next?: string) {
   const body = new FormData();
   if (password !== undefined) body.set("password", password);
+  if (next !== undefined) body.set("next", next);
   return POST(new Request("https://kryss.test/api/unlock", { method: "POST", body }));
 }
 
@@ -27,6 +28,20 @@ describe("POST /api/unlock", () => {
     const cookie = response.headers.get("set-cookie") ?? "";
     expect(cookie).toContain(`${GATE_COOKIE}=${gateToken(PASSWORD)}`);
     expect(cookie.toLowerCase()).toContain("httponly");
+  });
+
+  it("goes on to the puzzle link the login interrupted, and only to that", async () => {
+    const link = "/p/3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+    expect((await unlock(PASSWORD, link)).headers.get("location")).toBe(`https://kryss.test${link}`);
+    expect((await unlock(PASSWORD, "//evil.example")).headers.get("location")).toBe("https://kryss.test/");
+  });
+
+  it("keeps the puzzle link when the password is wrong", async () => {
+    const link = "/p/3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+    const pending = unlock("wrong", link);
+    await vi.runAllTimersAsync();
+    const location = new URL((await pending).headers.get("location") ?? "");
+    expect([location.pathname, location.searchParams.get("next")]).toEqual(["/login", link]);
   });
 
   it("delays and redirects back to login on a wrong password", async () => {

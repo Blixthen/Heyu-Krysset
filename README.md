@@ -43,10 +43,11 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
    "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`, plus the
    repository variables `NEXT_PUBLIC_SUPABASE_URL` and
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-2. Create the R2 bucket for crossword photos, named `heyu` (bound as `PHOTOS`
-   in `wrangler.jsonc`), and let photos expire after 7 days:
-   `pnpm exec wrangler r2 bucket create heyu` and
-   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-photos photos/ --expire-days 7`.
+2. Create the R2 bucket for crossword photos and puzzles, named `heyu` (bound
+   as `PHOTOS` in `wrangler.jsonc`), and let both expire after 7 days:
+   `pnpm exec wrangler r2 bucket create heyu`,
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-photos photos/ --expire-days 7` and
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-puzzles puzzles/ --expire-days 7`.
 3. After the first deploy, set the runtime secrets:
    `pnpm exec wrangler secret put APP_PASSWORD` and
    `pnpm exec wrangler secret put GEMINI_API_KEY`.
@@ -68,6 +69,9 @@ use `pnpm preview`.
 - **Photos**: the browser uploads a sharp copy of the photo to `/api/photo`
   (behind the gate), which stores it in the R2 bucket; the puzzle carries only
   its id, plus a small inline copy.
+- **Links**: the uploader also saves the puzzle to `/api/puzzle`, and
+  `/p/<id>` opens it again, even after everyone has left. The address bar
+  shows the current puzzle's link.
 - **Sync**: peers exchange chat messages, letters and the puzzle over Supabase
   Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). Apart from photos,
   nothing is stored on a server; when a client joins it asks the room for the
@@ -78,6 +82,7 @@ use `pnpm preview`.
 ### Known limitations
 
 - State lives only in connected browsers; when everyone leaves, the puzzle and
-  chat are gone. Stored photos stay in R2 until they expire.
+  chat are gone. A puzzle's link brings back the puzzle, but not the letters,
+  until it expires.
 - Anyone with the password is trusted: they can replace the puzzle or use any
   nickname.
