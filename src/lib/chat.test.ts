@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendMessage, formatTime, isChatMessage, MAX_MESSAGES, toChatMessage, type ChatMessage } from "./chat";
+import { appendMessage, countUnread, formatTime, isChatMessage, MAX_MESSAGES, toChatMessage, type ChatMessage } from "./chat";
 
 const message: ChatMessage = {
   id: "m1",
@@ -63,5 +63,24 @@ describe("appendMessage", () => {
     expect(list).toHaveLength(MAX_MESSAGES);
     expect(list[0].id).toBe("m5");
     expect(list.at(-1)?.id).toBe(`m${MAX_MESSAGES + 4}`);
+  });
+});
+
+describe("countUnread", () => {
+  const message = (id: string, senderId: string): ChatMessage => ({ id, senderId, nickname: "N", text: "t", sentAt: "" });
+  const messages = [message("a", "peer"), message("b", "me"), message("c", "peer"), message("d", "peer")];
+
+  it("counts others' messages after the last one seen", () => {
+    expect(countUnread(messages, "b", "me")).toBe(2);
+    expect(countUnread(messages, "d", "me")).toBe(0);
+  });
+
+  it("does not count our own messages", () => {
+    expect(countUnread(messages, "a", "me")).toBe(2);
+  });
+
+  it("counts everything when nothing was seen or the seen message was trimmed", () => {
+    expect(countUnread(messages, null, "me")).toBe(3);
+    expect(countUnread(messages, "gone", "me")).toBe(3);
   });
 });
