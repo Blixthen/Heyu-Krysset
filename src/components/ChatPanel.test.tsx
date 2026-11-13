@@ -61,6 +61,23 @@ describe("ChatPanel", () => {
     expect(input.value).toBe("");
   });
 
+  it("folds and unfolds from its heading, showing how many messages are new", () => {
+    const onToggle = vi.fn();
+    renderPanel({ open: false, unread: 3, onToggle });
+    const toggle = screen.getByRole("button", { name: /Livechatt/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain("3 nya");
+    expect(document.getElementById("chat-body")?.className).toMatch(/(^| )hidden( |$)/);
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("shows the messages when unfolded", () => {
+    renderPanel({ open: true, unread: 0, onToggle: vi.fn() });
+    expect(screen.getByRole("button", { name: "Livechatt" }).getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById("chat-body")?.className).not.toMatch(/(^| )hidden( |$)/);
+  });
+
   it("offers a manual reconnect after giving up", () => {
     const { onReconnect } = renderPanel({ status: "error", connectionError: "Kanalen svarade inte." });
     fireEvent.click(screen.getByText("Försök igen"));

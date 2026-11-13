@@ -195,6 +195,18 @@ export function chooseDirection(cells: LetterCell[], cell: LetterCell, current: 
   return toggleDirection(cells, cell, current);
 }
 
+/**
+ * The typing direction for a cell the user tapped. A cell that starts a word
+ * in only one direction is where you begin typing that word, even in the
+ * middle of a word the other way; otherwise as chooseDirection.
+ */
+export function directionForTap(cells: LetterCell[], cell: LetterCell, current: Direction): Direction {
+  const starts = (["across", "down"] as const).filter(
+    (direction) => nextInWord(cells, cell, direction, -1) === null && nextInWord(cells, cell, direction, 1) !== null,
+  );
+  return starts.length === 1 ? starts[0] : chooseDirection(cells, cell, current);
+}
+
 /** The direction after tapping the selected cell again: the other way, if a word runs that way. */
 export function toggleDirection(cells: LetterCell[], cell: LetterCell, current: Direction): Direction {
   const other = otherDirection(current);

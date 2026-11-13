@@ -110,6 +110,22 @@ describe("CrosswordGrid", () => {
     expect(document.activeElement).toBe(cell(1, 2));
   });
 
+  it("types down from a tapped cell that starts a down word in the middle of an across word", () => {
+    render(<Harness />);
+    cell(0, 1).focus();
+    fireEvent.change(cell(0, 1), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(1, 1));
+  });
+
+  it("keeps typing across into a cell that starts a down word", () => {
+    render(<Harness />);
+    cell(0, 0).focus();
+    fireEvent.change(cell(0, 0), { target: { value: "a" } });
+    expect(document.activeElement).toBe(cell(0, 1));
+    fireEvent.change(cell(0, 1), { target: { value: "b" } });
+    expect(document.activeElement).toBe(cell(0, 2));
+  });
+
   it("keeps the word's direction when an arrow key hits the edge", () => {
     render(<Harness puzzle={withClues} />);
     cell(1, 0).focus();
@@ -152,11 +168,11 @@ describe("CrosswordGrid", () => {
   });
 
   it("backspace in an empty cell steps back and clears the previous cell", () => {
-    render(<Harness initial={{ "0-0": "A" }} />);
-    cell(0, 1).focus();
-    fireEvent.keyDown(cell(0, 1), { key: "Backspace" });
-    expect(document.activeElement).toBe(cell(0, 0));
-    expect(cell(0, 0).value).toBe("");
+    render(<Harness initial={{ "1-0": "A" }} />);
+    cell(1, 1).focus();
+    fireEvent.keyDown(cell(1, 1), { key: "Backspace" });
+    expect(document.activeElement).toBe(cell(1, 0));
+    expect(cell(1, 0).value).toBe("");
   });
 
   it("arrow keys stop at the edge", () => {

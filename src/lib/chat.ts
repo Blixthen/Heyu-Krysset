@@ -54,3 +54,12 @@ export function appendMessage<T extends { id: string }>(list: T[], message: T) {
   const next = [...list, message];
   return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
 }
+
+/**
+ * Messages from others that arrived after `lastSeenId`. If that message is no
+ * longer in the list (trimmed, or nothing seen yet), every message counts.
+ */
+export function countUnread(messages: ChatMessage[], lastSeenId: string | null, clientId: string) {
+  const seenAt = lastSeenId === null ? -1 : messages.findIndex((message) => message.id === lastSeenId);
+  return messages.slice(seenAt + 1).filter((message) => message.senderId !== clientId).length;
+}
