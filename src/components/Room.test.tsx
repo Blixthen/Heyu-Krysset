@@ -76,6 +76,17 @@ describe("Room", () => {
     expect(toggle().textContent).toContain("2 nya");
   });
 
+  it("shows the banner photo behind the header, still when less motion is asked for", () => {
+    room.current = roomState();
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    const header = screen.getByRole("banner");
+    expect(header.querySelector("img")?.getAttribute("src")).toBe("/banner.webp");
+    const still = header.querySelector('source[media="(prefers-reduced-motion: reduce)"]');
+    expect(still?.getAttribute("srcset")).toBe("/banner-still.webp");
+    // Decorative (empty alt), so screen readers skip it.
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
   it("shows share errors", () => {
     room.current = roomState({ shareError: "Korsordet kunde inte delas med de andra." });
     render(<Room nickname="Nova" onLeave={() => {}} />);

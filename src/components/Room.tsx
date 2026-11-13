@@ -36,8 +36,19 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
 
   return (
     <main className="flex h-dvh max-h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-3 sm:px-5">
-        <div className="flex items-center gap-3">
+      {/* Phones have no room beside the title and buttons, so the photo gets its own row above them. */}
+      <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-5">
+        {/* Decoration only. The still frame stands in when the user asks for less motion. */}
+        <picture className="col-span-2 justify-self-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+          <source media="(prefers-reduced-motion: reduce)" srcSet="/banner-still.webp" />
+          {/* Square crop of a portrait photo; 30% from the top keeps the whole face in. */}
+          <img
+            src="/banner.webp"
+            alt=""
+            className="size-24 rounded-2xl object-cover object-[50%_30%] sm:size-28 lg:size-32"
+          />
+        </picture>
+        <div className="flex min-w-0 items-center gap-3 sm:row-start-1">
           <span className="flex size-10 items-center justify-center rounded-2xl bg-sky-400/15 text-sky-300">
             <Grid3x3 className="size-5" />
           </span>
@@ -46,7 +57,7 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
             <p className="text-xs text-slate-400">Inloggad som {nickname}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
           {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} /> : null}
           <button
             type="button"
