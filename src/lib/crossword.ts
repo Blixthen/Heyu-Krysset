@@ -148,6 +148,68 @@ export function isCellUpdate(value: unknown): value is CellUpdate {
   );
 }
 
+export type Direction = "across" | "down";
+
+/**
+ * How far apart (in cell sizes, centre to centre) two cells may be and still
+ * be neighbours in a word: grid lines and photo skew leave small gaps, while
+ * a clue square in between puts the next cell two sizes away.
+ */
+const MAX_WORD_STEP = 1.5;
+/** How far off the line (in cell sizes) a neighbour in the same word may sit. */
+const MAX_WORD_DRIFT = 0.5;
+
+type Step = { rowStep: -1 | 0 | 1; colStep: -1 | 0 | 1 };
+const FORWARD: Record<Direction, Step> = { across: { rowStep: 0, colStep: 1 }, down: { rowStep: 1, colStep: 0 } };
+const BACKWARD: Record<Direction, Step> = { across: { rowStep: 0, colStep: -1 }, down: { rowStep: -1, colStep: 0 } };
+
+const nextInWord = (cells: LetterCell[], from: LetterCell, step: Step) =>
+  adjacentCell(cells, from, step.rowStep, step.colStep);
+
+/** The cell right next to `from` in a direction, or null if a clue square, picture or edge comes first. */
+export function adjacentCell(cells: LetterCell[], from: LetterCell, rowStep: -1 | 0 | 1, colStep: -1 | 0 | 1) {
+  const next = findNeighbor(cells, from, rowStep, colStep);
+  if (!next) return null;
+  const along = Math.abs(colStep !== 0 ? next.x - from.x : next.y - from.y) / (colStep !== 0 ? from.w : from.h);
+  const drift = Math.abs(colStep !== 0 ? next.y - from.y : next.x - from.x) / (colStep !== 0 ? from.h : from.w);
+  return along <= MAX_WORD_STEP && drift <= MAX_WORD_DRIFT ? next : null;
+}
+
+/** Whether a word of two or more letters runs through the cell in a direction. */
+export function hasWord(cells: LetterCell[], cell: LetterCell, direction: Direction) {
+  return nextInWord(cells, cell, FORWARD[direction]) !== null || nextInWord(cells, cell, BACKWARD[direction]) !== null;
+}
+
+/**
+ * The typing direction for a newly selected cell: the current one if a word
+ * runs that way through it, otherwise the other way if one does. A cell in
+ * both an across and a down word keeps the current direction.
+ */
+export function chooseDirection(cells: LetterCell[], cell: LetterCell, current: Direction): Direction {
+  if (hasWord(cells, cell, current)) return current;
+  const other = current === "across" ? "down" : "across";
+  return hasWord(cells, cell, other) ? other : current;
+}
+
+/** The cells of the word through `cell` in a direction, first to last. */
+export function wordCells(cells: LetterCell[], cell: LetterCell, direction: Direction) {
+  const word = [cell];
+  // Bounded by the cell count, so a malformed peer grid can't loop forever.
+  for (let at = cell; word.length <= cells.length; ) {
+    const before = nextInWord(cells, at, BACKWARD[direction]);
+    if (!before || word.includes(before)) break;
+    word.unshift(before);
+    at = before;
+  }
+  for (let at = cell; word.length <= cells.length; ) {
+    const after = nextInWord(cells, at, FORWARD[direction]);
+    if (!after || word.includes(after)) break;
+    word.push(after);
+    at = after;
+  }
+  return word;
+}
+
 /**
  * Finds the nearest cell in a direction, using geometry rather than row/col
  * indices because bildkorsord grids are irregular. Cross-axis distance is
