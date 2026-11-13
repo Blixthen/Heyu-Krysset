@@ -1,3 +1,5 @@
+import { isPlayerName } from "./players";
+
 /**
  * Shared crossword types and validators. Used by both the browser (to validate
  * realtime payloads from peers) and the server (to validate Gemini output).
@@ -22,6 +24,8 @@ export type CrosswordPuzzle = {
 };
 
 export type Letters = Record<string, string>;
+/** The nickname of whoever typed each letter, keyed like Letters. */
+export type Authors = Record<string, string>;
 
 export type CellPosition = { row: number; col: number };
 
@@ -123,18 +127,30 @@ export function toCrosswordPuzzle(puzzle: CrosswordPuzzle): CrosswordPuzzle {
   };
 }
 
-/** Reads a letters map from a peer, keeping only keys that exist in the puzzle. */
-export function lettersFromPayload(value: unknown, cells: LetterCell[]): Letters {
+/** Reads a map keyed by cell from a peer, keeping puzzle cells whose value `read` accepts. */
+function cellMapFromPayload(value: unknown, cells: LetterCell[], read: (entry: unknown) => string | null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const valid = new Set(cells.map((cell) => cellKey(cell.row, cell.col)));
-  const letters: Letters = {};
-  for (const [key, letter] of Object.entries(value)) {
-    if (valid.has(key) && typeof letter === "string") letters[key] = oneLetter(letter);
+  const map: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const accepted = valid.has(key) ? read(entry) : null;
+    if (accepted !== null) map[key] = accepted;
   }
-  return letters;
+  return map;
 }
 
-export type CellUpdate = { puzzleId: string; row: number; col: number; value: string };
+/** Reads a letters map from a peer, keeping only keys that exist in the puzzle. */
+export function lettersFromPayload(value: unknown, cells: LetterCell[]): Letters {
+  return cellMapFromPayload(value, cells, (letter) => (typeof letter === "string" ? oneLetter(letter) : null));
+}
+
+/** Reads an authors map from a peer, keeping only puzzle cells and valid nicknames. */
+export function authorsFromPayload(value: unknown, cells: LetterCell[]): Authors {
+  return cellMapFromPayload(value, cells, (author) => (isPlayerName(author) ? author : null));
+}
+
+/** `author` is optional: tabs from before it existed send updates without one. */
+export type CellUpdate = { puzzleId: string; row: number; col: number; value: string; author?: string };
 
 export function isCellUpdate(value: unknown): value is CellUpdate {
   if (!value || typeof value !== "object") return false;
@@ -144,7 +160,8 @@ export function isCellUpdate(value: unknown): value is CellUpdate {
     isIndex(update.row) &&
     isIndex(update.col) &&
     typeof update.value === "string" &&
-    update.value.length <= 8
+    update.value.length <= 8 &&
+    (update.author === undefined || isPlayerName(update.author))
   );
 }
 

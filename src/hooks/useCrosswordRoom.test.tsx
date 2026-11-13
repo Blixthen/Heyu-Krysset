@@ -210,7 +210,7 @@ describe("useCrosswordRoom", () => {
       const room = await goLive();
       act(() => room.result.current.publishPuzzle(puzzle));
       await flush();
-      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: {} }]);
+      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: {}, authors: {} }]);
       expect(room.result.current.board.puzzle).toBe(puzzle);
     });
 
@@ -227,7 +227,7 @@ describe("useCrosswordRoom", () => {
       act(() => room.result.current.publishPuzzle(puzzle));
       act(() => room.channel().status("SUBSCRIBED"));
       await flush();
-      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: {} }]);
+      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: {}, authors: {} }]);
     });
 
     it("answers a sync request after a short jitter", async () => {
@@ -240,7 +240,7 @@ describe("useCrosswordRoom", () => {
       act(() => room.channel().receive("sync-request", {}));
       expect(room.channel().sentEvents("puzzle")).toHaveLength(0);
       await flush(400);
-      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: { "0-0": "A" } }]);
+      expect(room.channel().sentEvents("puzzle")).toEqual([{ puzzle, letters: { "0-0": "A" }, authors: { "0-0": "Nova" } }]);
     });
 
     it("does not answer if another peer answers first", async () => {
@@ -276,11 +276,22 @@ describe("useCrosswordRoom", () => {
       expect(room.result.current.board.puzzle).toBeNull();
     });
 
-    it("sends cell updates tagged with the puzzle id", async () => {
+    it("sends cell updates tagged with the puzzle id and our nickname", async () => {
       const room = await goLive();
       act(() => room.result.current.publishPuzzle(puzzle));
       act(() => room.result.current.setLetter(1, 2, "q"));
-      expect(room.channel().sentEvents("cell-update")).toEqual([{ puzzleId: puzzle.id, row: 1, col: 2, value: "Q" }]);
+      expect(room.channel().sentEvents("cell-update")).toEqual([
+        { puzzleId: puzzle.id, row: 1, col: 2, value: "Q", author: "Nova" },
+      ]);
+      expect(room.result.current.board.authors).toEqual({ "1-2": "Nova" });
+    });
+
+    it("takes the author from a peer's cell update and full board", async () => {
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      act(() => room.channel().receive("cell-update", { puzzleId: puzzle.id, row: 0, col: 1, value: "y", author: "Peer" }));
+      act(() => room.channel().receive("puzzle", { puzzle, letters: { "0-2": "B" }, authors: { "0-2": "Kim", "9-9": "Kim" } }));
+      expect(room.result.current.board.authors).toEqual({ "0-1": "Peer", "0-2": "Kim" });
     });
 
     it("applies peer cell updates only for the current puzzle", async () => {

@@ -9,6 +9,7 @@ import {
   oneLetter,
   toggleDirection,
   wordCells,
+  type Authors,
   type CellPosition,
   type CrosswordPuzzle,
   type Direction,
@@ -16,6 +17,7 @@ import {
   type Letters,
 } from "@/lib/crossword";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { PLAYER_COLOURS } from "./PlayerLegend";
 
 const ARROWS: Record<string, { direction: Direction; rowStep: -1 | 0 | 1; colStep: -1 | 0 | 1 }> = {
   ArrowRight: { direction: "across", rowStep: 0, colStep: 1 },
@@ -35,12 +37,17 @@ export function focusCell(cell: CellPosition) {
 export function CrosswordGrid({
   puzzle,
   letters,
+  authors = {},
+  colours = new Map(),
   selectedCell,
   onSelect,
   onLetter,
 }: {
   puzzle: CrosswordPuzzle;
   letters: Letters;
+  authors?: Authors;
+  /** Each author's colour slot, from assignColours. */
+  colours?: Map<string, number>;
   selectedCell: CellPosition | null;
   onSelect: (cell: CellPosition) => void;
   onLetter: (cell: CellPosition, letter: string) => void;
@@ -122,6 +129,11 @@ export function CrosswordGrid({
           const isSelected = selectedCell?.row === cell.row && selectedCell?.col === cell.col;
           const inWord = activeWord.size > 1 && activeWord.has(key);
           const letter = letters[key] ?? "";
+          const slot = letter ? colours.get(authors[key] ?? "") : undefined;
+          const tint = slot === undefined ? null : PLAYER_COLOURS[slot].tint;
+          // In the selected word a typed letter keeps its player's tint and gets an outline instead.
+          const background = letter ? (tint ?? (inWord ? "bg-sky-100/90" : "bg-white/80")) : inWord ? "bg-sky-300/35" : "bg-white/15";
+          const ring = isSelected ? "ring-2 ring-sky-500 ring-inset" : inWord && tint ? "ring-1 ring-sky-400 ring-inset" : "";
           return (
             <input
               key={key}
@@ -164,9 +176,7 @@ export function CrosswordGrid({
                 width: `${cell.w / 10}%`,
                 height: `${cell.h / 10}%`,
               }}
-              className={`absolute touch-manipulation scroll-mt-3 scroll-mb-[30vh] border border-transparent text-center text-base font-bold text-slate-950 uppercase outline-none ${
-                inWord ? (letter ? "bg-sky-100/90" : "bg-sky-300/35") : letter ? "bg-white/80" : "bg-white/15"
-              } ${isSelected ? "ring-2 ring-sky-500 ring-inset" : ""}`}
+              className={`absolute touch-manipulation scroll-mt-3 scroll-mb-[30vh] border border-transparent text-center text-base font-bold text-slate-950 uppercase outline-none ${background} ${ring}`}
             />
           );
         })}

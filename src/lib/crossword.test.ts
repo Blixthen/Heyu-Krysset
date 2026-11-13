@@ -1,6 +1,7 @@
 import { gridCells, makePuzzle } from "@/test/fixtures";
 import { describe, expect, it } from "vitest";
 import {
+  authorsFromPayload,
   adjacentCell,
   chooseDirection,
   directionForTap,
@@ -113,7 +114,30 @@ describe("lettersFromPayload", () => {
   });
 });
 
+describe("authorsFromPayload", () => {
+  const cells = gridCells();
+
+  it("keeps known cells with valid nicknames", () => {
+    expect(authorsFromPayload({ "0-0": "Kim", "1-1": "Ann" }, cells)).toEqual({ "0-0": "Kim", "1-1": "Ann" });
+  });
+
+  it("drops unknown keys, empty or overlong nicknames and non-strings", () => {
+    expect(authorsFromPayload({ "9-9": "Kim", "0-1": "", "0-2": "x".repeat(25), "1-0": 5, "1-1": "  " }, cells)).toEqual({});
+  });
+
+  it.each([null, "x", ["Kim"]])("returns {} for %j", (value) => {
+    expect(authorsFromPayload(value, cells)).toEqual({});
+  });
+});
+
 describe("isCellUpdate", () => {
+  it("accepts an optional author but not an invalid one", () => {
+    expect(isCellUpdate({ puzzleId: "p", row: 0, col: 1, value: "A", author: "Kim" })).toBe(true);
+    expect(isCellUpdate({ puzzleId: "p", row: 0, col: 1, value: "A", author: "" })).toBe(false);
+    expect(isCellUpdate({ puzzleId: "p", row: 0, col: 1, value: "A", author: 7 })).toBe(false);
+    expect(isCellUpdate({ puzzleId: "p", row: 0, col: 1, value: "A", author: " Kim" })).toBe(false);
+  });
+
   it("requires a puzzle id and bounded value", () => {
     expect(isCellUpdate({ puzzleId: "p", row: 0, col: 1, value: "A" })).toBe(true);
     expect(isCellUpdate({ row: 0, col: 1, value: "A" })).toBe(false);

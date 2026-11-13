@@ -3,16 +3,19 @@
 import { useCrosswordRoom } from "@/hooks/useCrosswordRoom";
 import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
+import { assignColours } from "@/lib/players";
 import { Grid3x3 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { CrosswordGrid, focusCell } from "./CrosswordGrid";
+import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
 import { PuzzleUploader } from "./PuzzleUploader";
 
 export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => void }) {
   const room = useCrosswordRoom(nickname);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
-  const { puzzle, letters } = room.board;
+  const { puzzle, letters, authors } = room.board;
+  const colours = useMemo(() => assignColours(Object.values(authors), PLAYER_COLOURS.length), [authors]);
   // On phones the chat folds down to a bar so the crossword gets the screen;
   // on wide screens it is always shown beside the grid.
   const [chatOpen, setChatOpen] = useState(false);
@@ -66,13 +69,20 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
       >
         <section className="flex min-h-0 items-stretch justify-center overflow-hidden p-2 sm:p-4">
           {puzzle ? (
-            <CrosswordGrid
-              puzzle={puzzle}
-              letters={letters}
-              selectedCell={selectedCell}
-              onSelect={setSelectedCell}
-              onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
-            />
+            <div className="flex min-h-0 w-full flex-col gap-2">
+              <PlayerLegend colours={colours} />
+              <div className="min-h-0 flex-1">
+                <CrosswordGrid
+                  puzzle={puzzle}
+                  letters={letters}
+                  authors={authors}
+                  colours={colours}
+                  selectedCell={selectedCell}
+                  onSelect={setSelectedCell}
+                  onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
+                />
+              </div>
+            </div>
           ) : (
             <PuzzleUploader onPuzzle={onPuzzle} />
           )}
