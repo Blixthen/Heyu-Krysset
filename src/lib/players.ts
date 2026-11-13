@@ -43,3 +43,25 @@ export function assignColours(names: Iterable<string>, slots: number): Map<strin
   }
   return colours;
 }
+
+/** A peer can open any number of tabs, so presence yields at most this many names; colours repeat past PLAYER_COLOURS anyway. */
+export const MAX_ONLINE = 50;
+
+/**
+ * The names of the players in the room, from a Supabase presence state
+ * (presence key → the payloads that client tracked). Peers choose what they
+ * track, so each nickname is validated; duplicates (one player in two tabs)
+ * collapse.
+ */
+export function onlineNames(state: unknown): string[] {
+  if (!state || typeof state !== "object") return [];
+  const names = new Set<string>();
+  for (const metas of Object.values(state)) {
+    if (!Array.isArray(metas)) continue;
+    for (const meta of metas) {
+      const nickname = (meta as { nickname?: unknown } | null)?.nickname;
+      if (isPlayerName(nickname)) names.add(nickname);
+    }
+  }
+  return [...names].toSorted().slice(0, MAX_ONLINE);
+}
