@@ -3,7 +3,7 @@
 import { useCrosswordRoom } from "@/hooks/useCrosswordRoom";
 import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
-import { assignColours } from "@/lib/players";
+import { assignColours, isPlayerName } from "@/lib/players";
 import { Grid3x3 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
@@ -15,7 +15,13 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
   const room = useCrosswordRoom(nickname);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
   const { puzzle, letters, authors } = room.board;
-  const colours = useMemo(() => assignColours(Object.values(authors), PLAYER_COLOURS.length), [authors]);
+  // Everyone in the room gets a colour as soon as they join, not only once
+  // they type; our own name counts before presence confirms it.
+  const { online } = room;
+  const colours = useMemo(() => {
+    const names = [...online, ...Object.values(authors), ...(isPlayerName(nickname) ? [nickname] : [])];
+    return assignColours(names, PLAYER_COLOURS.length);
+  }, [online, authors, nickname]);
   // On phones the chat folds down to a bar so the crossword gets the screen;
   // on wide screens it is always shown beside the grid.
   const [chatOpen, setChatOpen] = useState(false);

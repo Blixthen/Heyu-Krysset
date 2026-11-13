@@ -14,7 +14,7 @@ import {
   type CrosswordPuzzle,
   type Letters,
 } from "@/lib/crossword";
-import { isPlayerName } from "@/lib/players";
+import { isPlayerName, onlineNames } from "@/lib/players";
 import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
@@ -31,6 +31,7 @@ export type DisplayMessage = ChatMessage & { failed?: boolean };
  * - "cell-update":  a CellUpdate for one letter and who typed it
  * - "sync-request": sent by a client that just (re)joined; one peer answers with "puzzle"
  * - "reaction":     a Reaction, one player adding or removing an emoji on a message
+ * Presence, keyed by client id, tracks { nickname } for everyone in the room.
  */
 const MAX_RETRIES = 4;
 const SYNC_JITTER_MS = [50, 400] as const;
@@ -66,12 +67,14 @@ export function useCrosswordRoom(nickname: string) {
   const [shareError, setShareError] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [reactions, setReactions] = useState<Reactions>(() => new Map());
+  const [online, setOnline] = useState<string[]>([]);
   const [board, dispatch] = useReducer(boardReducer, emptyBoard);
   const [generation, setGeneration] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const router = useRouter();
   const readBoard = useEffectEvent(() => board);
+  const readNickname = useEffectEvent(() => nickname);
   const goToLogin = useEffectEvent(() => router.replace("/login"));
 
   const broadcastPuzzle = useCallback(
@@ -137,7 +140,7 @@ export function useCrosswordRoom(nickname: string) {
       if (cancelled) return;
 
       const channel = client.channel(topic, {
-        config: { broadcast: { self: false }, private: false },
+        config: { broadcast: { self: false }, presence: { key: clientId, enabled: true }, private: false },
       });
       if (channel.state !== "closed") {
         retry("Kanalen var fortfarande upptagen.");
@@ -146,6 +149,7 @@ export function useCrosswordRoom(nickname: string) {
       current = channel;
 
       channel
+        .on("presence", { event: "sync" }, () => setOnline(onlineNames(channel.presenceState())))
         .on("broadcast", { event: "message" }, ({ payload }) => {
           if (!isChatMessage(payload)) return;
           setMessages((list) => appendMessage(list, toChatMessage(payload)));
@@ -199,6 +203,9 @@ export function useCrosswordRoom(nickname: string) {
             const { puzzle, letters, authors } = readBoard();
             if (puzzle) void broadcastPuzzle(channel, puzzle, letters, authors);
             void channel.send({ type: "broadcast", event: "sync-request", payload: {} });
+            // Peers drop a nickname that fails validation, so don't announce one.
+            const name = readNickname();
+            if (isPlayerName(name)) void channel.track({ nickname: name });
             return;
           }
           if (state === "CHANNEL_ERROR" || state === "TIMED_OUT" || state === "CLOSED") {
@@ -216,7 +223,7 @@ export function useCrosswordRoom(nickname: string) {
       channelRef.current = null;
       if (current) void client.removeChannel(current);
     };
-  }, [broadcastPuzzle, generation]);
+  }, [broadcastPuzzle, clientId, generation]);
 
   const reconnect = useCallback(() => {
     setStatus("connecting");
@@ -302,6 +309,7 @@ export function useCrosswordRoom(nickname: string) {
     sendError,
     shareError,
     messages,
+    online,
     reactions,
     react,
     board,

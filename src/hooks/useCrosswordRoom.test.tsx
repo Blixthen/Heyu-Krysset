@@ -236,6 +236,34 @@ describe("useCrosswordRoom", () => {
     });
   });
 
+  describe("presence", () => {
+    it("announces our nickname under our client id once live", async () => {
+      const room = await connect();
+      expect(room.channel().track).not.toHaveBeenCalled();
+      act(() => room.channel().status("SUBSCRIBED"));
+      await flush();
+      expect(room.channel().track).toHaveBeenCalledWith({ nickname: "Nova" });
+      expect(room.channel().options).toMatchObject({ config: { presence: { key: room.result.current.clientId, enabled: true } } });
+    });
+
+    it("lists the valid nicknames of everyone in the room", async () => {
+      const room = await goLive();
+      act(() => room.channel().syncPresence({ a: [{ nickname: "Nova" }], b: [{ nickname: "Kim" }], c: [{ nickname: " bad" }] }));
+      expect(room.result.current.online).toEqual(["Kim", "Nova"]);
+      act(() => room.channel().syncPresence({ a: [{ nickname: "Nova" }] }));
+      expect(room.result.current.online).toEqual(["Nova"]);
+    });
+
+    it("does not announce a nickname peers would reject", async () => {
+      const hook = renderHook(() => useCrosswordRoom(" Nova"));
+      await flush();
+      act(() => fake.client!.latest!.status("SUBSCRIBED"));
+      await flush();
+      expect(fake.client!.latest!.track).not.toHaveBeenCalled();
+      hook.unmount();
+    });
+  });
+
   describe("puzzle sync", () => {
     const puzzle = makePuzzle();
 

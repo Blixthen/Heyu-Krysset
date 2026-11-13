@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignColours, isPlayerName, MAX_NICKNAME_LENGTH } from "./players";
+import { assignColours, isPlayerName, MAX_NICKNAME_LENGTH, MAX_ONLINE, onlineNames } from "./players";
 
 describe("isPlayerName", () => {
   it("accepts a trimmed, bounded name", () => {
@@ -35,5 +35,31 @@ describe("assignColours", () => {
     const slots = [...assignColours(names, 8).values()];
     expect(new Set(slots).size).toBe(8);
     expect(slots.every((slot) => slot >= 0 && slot < 8)).toBe(true);
+  });
+});
+
+describe("onlineNames", () => {
+  it("lists each valid nickname once, in sort order", () => {
+    const state = {
+      a: [{ nickname: "Liv", presence_ref: "1" }],
+      b: [{ nickname: "Ann", presence_ref: "2" }, { nickname: "Liv", presence_ref: "3" }],
+    };
+    expect(onlineNames(state)).toEqual(["Ann", "Liv"]);
+  });
+
+  it("drops nicknames that fail validation and entries that aren't lists", () => {
+    const state = { a: [{ nickname: " Kim" }, { nickname: 7 }, null, {}], b: "Ida", c: [{ nickname: "Åsa" }] };
+    expect(onlineNames(state)).toEqual(["Åsa"]);
+  });
+
+  it.each([null, undefined, "Kim", 7])("gives no names for %j", (state) => {
+    expect(onlineNames(state)).toEqual([]);
+  });
+
+  it(`keeps at most ${MAX_ONLINE} names`, () => {
+    const state = Object.fromEntries(Array.from({ length: MAX_ONLINE + 5 }, (_, i) => [`k${i}`, [{ nickname: `P${String(i).padStart(2, "0")}` }]]));
+    const names = onlineNames(state);
+    expect(names).toHaveLength(MAX_ONLINE);
+    expect(names[0]).toBe("P00");
   });
 });

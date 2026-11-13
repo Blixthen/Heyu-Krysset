@@ -10,13 +10,17 @@ export class FakeChannel {
   removed = false;
   sent: Sent[] = [];
   sendResult: "ok" | "error" | "timed out" = "ok";
+  presence: Record<string, unknown> = {};
   private handlers = new Map<string, Handler>();
   private onStatus: SubscribeCallback | null = null;
 
-  constructor(readonly topic: string) {}
+  constructor(
+    readonly topic: string,
+    readonly options?: unknown,
+  ) {}
 
-  on(_type: string, filter: { event: string }, handler: Handler) {
-    this.handlers.set(filter.event, handler);
+  on(type: string, filter: { event: string }, handler: Handler) {
+    this.handlers.set(`${type}:${filter.event}`, handler);
     return this;
   }
 
@@ -31,6 +35,18 @@ export class FakeChannel {
     return this.sendResult;
   });
 
+  track = vi.fn<(payload: unknown) => Promise<"ok">>(async () => "ok");
+
+  presenceState() {
+    return this.presence;
+  }
+
+  /** Simulates the server syncing presence: key → tracked payloads. */
+  syncPresence(state: Record<string, unknown>) {
+    this.presence = state;
+    this.handlers.get("presence:sync")?.({ payload: undefined });
+  }
+
   /** Simulates the server reporting a channel status. */
   status(state: string, error?: Error) {
     if (state === "SUBSCRIBED") this.state = "joined";
@@ -39,7 +55,7 @@ export class FakeChannel {
 
   /** Simulates a broadcast from a peer. */
   receive(event: string, payload: unknown) {
-    this.handlers.get(event)?.({ payload });
+    this.handlers.get(`broadcast:${event}`)?.({ payload });
   }
 
   sentEvents(event: string) {
@@ -54,10 +70,10 @@ export function createFakeSupabase() {
     get latest() {
       return channels.at(-1);
     },
-    channel(topic: string) {
+    channel(topic: string, options?: unknown) {
       const existing = channels.find((channel) => channel.topic === `realtime:${topic}` && !channel.removed);
       if (existing) return existing;
-      const channel = new FakeChannel(`realtime:${topic}`);
+      const channel = new FakeChannel(`realtime:${topic}`, options);
       channels.push(channel);
       return channel;
     },

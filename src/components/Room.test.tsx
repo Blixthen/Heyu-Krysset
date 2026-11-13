@@ -17,6 +17,7 @@ function roomState(overrides: object = {}) {
     sendError: "",
     shareError: "",
     messages: [],
+    online: [],
     reactions: new Map(),
     react: vi.fn(),
     board: emptyBoard,
@@ -50,13 +51,28 @@ describe("Room", () => {
     room.current = roomState({ board });
     render(<Room nickname="Nova" onLeave={() => {}} />);
     const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
-    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv"]);
+    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv", "Nova"]);
     // Ann and Liv hash to the same colour, so Liv moves on to another; each dot matches its letters' tint.
     const dot = (item: Element) => item.querySelector("span")?.className.match(/\bbg-(\w+)-300\b/)?.[1];
     const tint = (label: string) => screen.getByLabelText(label).className.match(/\bbg-(\w+)-300\/40\b/)?.[1];
     expect(dot(players[0])).toBe(tint("Rad 1, ruta 2"));
     expect(dot(players[1])).toBe(tint("Rad 1, ruta 1"));
     expect(dot(players[0])).not.toBe(dot(players[1]));
+  });
+
+  it("gives a colour to everyone in the room before they type, and to us", () => {
+    const board = { puzzle: makePuzzle(), letters: { "0-0": "A" }, authors: { "0-0": "Liv" } };
+    room.current = roomState({ board, online: ["Ann", "Nova"] });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
+    expect(players.map((item) => item.textContent)).toEqual(["Ann", "Liv", "Nova"]);
+  });
+
+  it("gives us a colour before presence has synced", () => {
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} } });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    const players = screen.getAllByRole("listitem").filter((item) => item.closest('[aria-label="Spelare"]'));
+    expect(players.map((item) => item.textContent)).toEqual(["Nova"]);
   });
 
   it("folds the chat on phones and counts messages that arrive while it is folded", () => {
