@@ -94,7 +94,9 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
           connectionError={room.connectionError}
           sendError={room.sendError}
           messages={room.messages}
+          reactions={room.reactions}
           onSend={(text) => void room.sendMessage(text)}
+          onReact={(messageId, emoji) => void room.react(messageId, emoji)}
           onReconnect={room.reconnect}
           open={chatOpen}
           unread={unread}

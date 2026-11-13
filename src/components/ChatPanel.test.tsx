@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { DisplayMessage } from "@/hooks/useCrosswordRoom";
+import type { Reactions } from "@/lib/reactions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -87,5 +88,36 @@ describe("ChatPanel", () => {
   it("does not offer reconnect while still connecting", () => {
     renderPanel({ status: "connecting", connectionError: "Kanalen svarade inte." });
     expect(screen.queryByText("Försök igen")).toBeNull();
+  });
+
+  describe("reactions", () => {
+    const peerMessage: DisplayMessage = { ...base, id: "m2", senderId: "peer", nickname: "Kim", text: "Svårt!" };
+
+    it("reacts with an emoji picked from a message's picker, then closes it", () => {
+      const onReact = vi.fn();
+      renderPanel({ messages: [base, peerMessage], onReact });
+      fireEvent.click(screen.getByRole("button", { name: "Reagera på Kims meddelande" }));
+      fireEvent.click(screen.getByRole("button", { name: "Reagera med 😂" }));
+      expect(onReact).toHaveBeenCalledWith("m2", "😂");
+      expect(screen.queryByRole("group", { name: "Välj reaktion" })).toBeNull();
+    });
+
+    it("shows who reacted, marks our own reaction, and toggles it on tap", () => {
+      const onReact = vi.fn();
+      const reactions = new Map([
+        ["m2", new Map([["👍", new Map([["peer", "Kim"], ["me", "Nova"]])], ["❤️", new Map([["peer", "Kim"]])]])],
+      ]) as Reactions;
+      renderPanel({ messages: [peerMessage], reactions, onReact });
+      const thumbs = screen.getByRole("button", { name: "👍 2: Kim, Nova" });
+      expect(thumbs.getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByRole("button", { name: "❤️ 1: Kim" }).getAttribute("aria-pressed")).toBe("false");
+      fireEvent.click(thumbs);
+      expect(onReact).toHaveBeenCalledWith("m2", "👍");
+    });
+
+    it("offers no reactions on a message that failed to send", () => {
+      renderPanel({ messages: [{ ...base, failed: true }], onReact: vi.fn() });
+      expect(screen.queryByRole("button", { name: /Reagera/ })).toBeNull();
+    });
   });
 });
