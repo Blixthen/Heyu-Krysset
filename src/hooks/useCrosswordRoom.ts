@@ -14,7 +14,7 @@ import {
   type CrosswordPuzzle,
   type Letters,
 } from "@/lib/crossword";
-import { isPlayerName, onlineNames } from "@/lib/players";
+import { isPlayerName, onlineNames, sameNames } from "@/lib/players";
 import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
@@ -35,6 +35,9 @@ export type DisplayMessage = ChatMessage & { failed?: boolean };
  */
 const MAX_RETRIES = 4;
 const SYNC_JITTER_MS = [50, 400] as const;
+/** Presence announcements that fail are retried this often, after this long, before waiting for the next presence sync. */
+const MAX_TRACK_RETRIES = 3;
+const TRACK_RETRY_MS = 1000;
 
 const SECRET_KEY_ERROR =
   "Nyckeln i appen är en hemlig Supabase-nyckel. Byt till publishable-nyckeln, den som börjar med sb_publishable_.";
@@ -97,11 +100,14 @@ export function useCrosswordRoom(nickname: string) {
     let attempt = 0;
     let retryTimer: number | undefined;
     let syncTimer: number | undefined;
+    let trackTimer: number | undefined;
     let current: RealtimeChannel | null = null;
     let topic: string | null = null;
 
     const retry = (message: string) => {
       channelRef.current = null;
+      // Presence from a dropped channel is stale; the next sync fills it again.
+      setOnline([]);
       setConnectionError(message);
       if (attempt >= MAX_RETRIES) {
         setStatus("error");
@@ -148,8 +154,28 @@ export function useCrosswordRoom(nickname: string) {
       }
       current = channel;
 
+      // Tells peers we're here. A failed announcement is retried a few times;
+      // after that, a presence sync without us tries again.
+      let announcing = false;
+      const announce = async (tries = 0) => {
+        const nickname = readNickname();
+        // Peers drop a nickname that fails validation, so don't announce one.
+        if (announcing || !isPlayerName(nickname)) return;
+        announcing = true;
+        const result = await channel.track({ nickname });
+        announcing = false;
+        if (result === "ok" || cancelled || current !== channel || tries >= MAX_TRACK_RETRIES) return;
+        window.clearTimeout(trackTimer);
+        trackTimer = window.setTimeout(() => void announce(tries + 1), TRACK_RETRY_MS);
+      };
+
       channel
-        .on("presence", { event: "sync" }, () => setOnline(onlineNames(channel.presenceState())))
+        .on("presence", { event: "sync" }, () => {
+          const state = channel.presenceState();
+          const next = onlineNames(state);
+          setOnline((list) => (sameNames(list, next) ? list : next));
+          if (channelRef.current === channel && !(clientId in state)) void announce();
+        })
         .on("broadcast", { event: "message" }, ({ payload }) => {
           if (!isChatMessage(payload)) return;
           setMessages((list) => appendMessage(list, toChatMessage(payload)));
@@ -203,9 +229,7 @@ export function useCrosswordRoom(nickname: string) {
             const { puzzle, letters, authors } = readBoard();
             if (puzzle) void broadcastPuzzle(channel, puzzle, letters, authors);
             void channel.send({ type: "broadcast", event: "sync-request", payload: {} });
-            // Peers drop a nickname that fails validation, so don't announce one.
-            const name = readNickname();
-            if (isPlayerName(name)) void channel.track({ nickname: name });
+            void announce();
             return;
           }
           if (state === "CHANNEL_ERROR" || state === "TIMED_OUT" || state === "CLOSED") {
@@ -220,6 +244,7 @@ export function useCrosswordRoom(nickname: string) {
       cancelled = true;
       window.clearTimeout(retryTimer);
       window.clearTimeout(syncTimer);
+      window.clearTimeout(trackTimer);
       channelRef.current = null;
       if (current) void client.removeChannel(current);
     };

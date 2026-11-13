@@ -35,7 +35,8 @@ export class FakeChannel {
     return this.sendResult;
   });
 
-  track = vi.fn<(payload: unknown) => Promise<"ok">>(async () => "ok");
+  trackResult: "ok" | "error" | "timed out" = "ok";
+  track = vi.fn<(payload: unknown) => Promise<"ok" | "error" | "timed out">>(async () => this.trackResult);
 
   presenceState() {
     return this.presence;

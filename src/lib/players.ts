@@ -25,16 +25,19 @@ function preferredSlot(name: string, slots: number) {
 }
 
 /**
- * A colour slot for each player. Every name takes the slot it hashes to; on a
- * clash, the name later in sort order moves on to the next free slot. Every
- * tab works this out from the same synced set of names, so all agree without
- * coordinating, and colours only move when a new name clashes. With more
- * players than slots, colours repeat.
+ * A colour slot for each name, after the ones already in `assigned`. Every
+ * name takes the slot it hashes to; on a clash, the name later in sort order
+ * moves on to the next free slot. Tabs that see the same names agree without
+ * coordinating. With more names than slots, colours repeat.
  */
-export function assignColours(names: Iterable<string>, slots: number): Map<string, number> {
-  const colours = new Map<string, number>();
-  const taken = new Set<number>();
-  for (const name of [...new Set(names)].toSorted()) {
+export function assignColours(
+  names: Iterable<string>,
+  slots: number,
+  assigned: ReadonlyMap<string, number> = new Map(),
+): Map<string, number> {
+  const colours = new Map(assigned);
+  const taken = new Set(assigned.values());
+  for (const name of [...new Set(names)].filter((name) => !assigned.has(name)).toSorted()) {
     const preferred = preferredSlot(name, slots);
     const free = Array.from({ length: slots }, (_, step) => (preferred + step) % slots).find((slot) => !taken.has(slot));
     const slot = free ?? preferred;
@@ -44,7 +47,21 @@ export function assignColours(names: Iterable<string>, slots: number): Map<strin
   return colours;
 }
 
-/** A peer can open any number of tabs, so presence yields at most this many names; colours repeat past PLAYER_COLOURS anyway. */
+/**
+ * Colours for the players who typed letters, then for those only online, in
+ * the slots left over. Letters are the same synced board in every tab, so
+ * their colours agree everywhere and don't move when someone just watching
+ * comes or goes. A watcher's colour may move once they type.
+ */
+export function playerColours(authors: Iterable<string>, online: Iterable<string>, slots: number) {
+  return assignColours(online, slots, assignColours(authors, slots));
+}
+
+/**
+ * A peer can open any number of tabs, so presence yields at most this many
+ * names (the first found, so a flood can still crowd others out, but the
+ * work stays bounded); colours repeat past PLAYER_COLOURS anyway.
+ */
 export const MAX_ONLINE = 50;
 
 /**
@@ -61,7 +78,13 @@ export function onlineNames(state: unknown): string[] {
     for (const meta of metas) {
       const nickname = (meta as { nickname?: unknown } | null)?.nickname;
       if (isPlayerName(nickname)) names.add(nickname);
+      if (names.size >= MAX_ONLINE) return [...names].toSorted();
     }
   }
-  return [...names].toSorted().slice(0, MAX_ONLINE);
+  return [...names].toSorted();
+}
+
+/** Whether two sorted name lists are the same, so an unchanged presence sync needn't rerender. */
+export function sameNames(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((name, index) => name === b[index]);
 }

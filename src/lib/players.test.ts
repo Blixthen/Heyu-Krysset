@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignColours, isPlayerName, MAX_NICKNAME_LENGTH, MAX_ONLINE, onlineNames } from "./players";
+import { assignColours, isPlayerName, MAX_NICKNAME_LENGTH, MAX_ONLINE, onlineNames, playerColours, sameNames } from "./players";
 
 describe("isPlayerName", () => {
   it("accepts a trimmed, bounded name", () => {
@@ -56,10 +56,42 @@ describe("onlineNames", () => {
     expect(onlineNames(state)).toEqual([]);
   });
 
-  it(`keeps at most ${MAX_ONLINE} names`, () => {
-    const state = Object.fromEntries(Array.from({ length: MAX_ONLINE + 5 }, (_, i) => [`k${i}`, [{ nickname: `P${String(i).padStart(2, "0")}` }]]));
+  it(`stops reading after ${MAX_ONLINE} names`, () => {
+    let read = 0;
+    const meta = (i: number) => ({
+      get nickname() {
+        read += 1;
+        return `P${String(i).padStart(2, "0")}`;
+      },
+    });
+    const state = Object.fromEntries(Array.from({ length: MAX_ONLINE + 5 }, (_, i) => [`k${i}`, [meta(i)]]));
     const names = onlineNames(state);
     expect(names).toHaveLength(MAX_ONLINE);
     expect(names[0]).toBe("P00");
+    expect(read).toBe(MAX_ONLINE);
+  });
+});
+
+describe("playerColours", () => {
+  // Ann and Liv both hash to slot 0; Kim hashes to 4.
+  it("keeps a typist's colour when someone only watching clashes with it, and when they leave", () => {
+    const watching = playerColours(["Liv"], ["Ann", "Liv"], 8);
+    expect(Object.fromEntries(watching)).toEqual({ Liv: 0, Ann: 1 });
+    expect(playerColours(["Liv"], [], 8).get("Liv")).toBe(0);
+  });
+
+  it("gives watchers only the slots typists left, so typists never share while slots remain", () => {
+    const watchers = Array.from({ length: 6 }, (_, i) => `W${i}`);
+    const colours = playerColours(["Ann", "Kim"], watchers, 8);
+    expect([colours.get("Ann"), colours.get("Kim")]).toEqual([0, 4]);
+    expect(watchers.map((name) => colours.get(name)).toSorted()).toEqual([1, 2, 3, 5, 6, 7]);
+  });
+});
+
+describe("sameNames", () => {
+  it("compares sorted lists name by name", () => {
+    expect(sameNames(["Ann", "Kim"], ["Ann", "Kim"])).toBe(true);
+    expect(sameNames(["Ann", "Kim"], ["Ann"])).toBe(false);
+    expect(sameNames(["Ann", "Kim"], ["Ann", "Liv"])).toBe(false);
   });
 });
