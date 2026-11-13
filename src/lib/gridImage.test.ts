@@ -78,6 +78,12 @@ const word: Painter = (page, left, top) => page.fill(left + 8, top + 12, 24, 2, 
 const grey: Painter = (page, left, top) => page.fill(left + 1, top + 1, SIZE - 1, SIZE - 1, 200);
 /** A letter square printed pale green, as solution words often are: darker than the paper, like the grey block. */
 const green: Painter = (page, left, top) => page.fill(left + 1, top + 1, SIZE - 1, SIZE - 1, [180, 210, 206]);
+/** A clue square printed pale green, a short word near the top and one near the bottom, its centre blank and no divider. */
+const greenClue: Painter = (page, left, top) => {
+  green(page, left, top);
+  page.fill(left + 13, top + 9, 14, 2, 30);
+  page.fill(left + 13, top + 29, 14, 2, 30);
+};
 
 /** A plain white area of a photograph (like a wall) over a block of squares: blank, but no grid lines. */
 function whiteArea(page: Page, row: number, col: number, size: number) {
@@ -159,6 +165,15 @@ describe("classifySquares", () => {
       const kind = kinds(new Page(20).paint(2, 3, green).paint(2, 4, grey).cast([...cast]).pixels());
       expect([kind(2, 3), kind(2, 4)], `cast ${cast.join(", ")}`).toEqual(["letter", "other"]);
     }
+  });
+
+  it("does not read a tinted clue square with a blank centre as a marked letter square", () => {
+    expect(kinds(new Page(20).paint(2, 3, greenClue).pixels())(2, 3)).toBe("other");
+  });
+
+  it("does not read a neutral grey block as tinted on cream paper", () => {
+    const kind = kinds(new Page(20).cast([1, 0.96, 0.86]).paint(2, 4, grey).paint(2, 3, green).pixels());
+    expect([kind(2, 3), kind(2, 4)]).toEqual(["letter", "other"]);
   });
 
   it("reads squares cut off by the photo's bottom edge", () => {
