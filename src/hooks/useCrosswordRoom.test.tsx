@@ -341,6 +341,48 @@ describe("useCrosswordRoom", () => {
       });
     });
 
+    it("opens a stored puzzle in an empty room and shares it", async () => {
+      const room = await goLive();
+      act(() => room.result.current.restorePuzzle(puzzle));
+      await flush();
+      expect(room.result.current.board.puzzle).toEqual(puzzle);
+      expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({ puzzle, letters: {}, authors: {} });
+    });
+
+    it("keeps the room's newer puzzle over a stored older one, without sharing it", async () => {
+      const room = await goLive();
+      const newer = makePuzzle({ id: "newer", createdAt: puzzle.createdAt + 1 });
+      act(() => room.result.current.publishPuzzle(newer));
+      await flush();
+      const sent = room.channel().sentEvents("puzzle").length;
+      act(() => room.result.current.restorePuzzle(puzzle));
+      await flush();
+      expect(room.result.current.board.puzzle?.id).toBe("newer");
+      expect(room.channel().sentEvents("puzzle")).toHaveLength(sent);
+    });
+
+    it("doesn't share a stored puzzle the room already has", async () => {
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      await flush();
+      const sent = room.channel().sentEvents("puzzle").length;
+      act(() => room.result.current.restorePuzzle(puzzle));
+      await flush();
+      expect(room.channel().sentEvents("puzzle")).toHaveLength(sent);
+    });
+
+    it("sees a peer's newer puzzle that arrived just before the link loaded, before any render", async () => {
+      const room = await goLive();
+      const newer = makePuzzle({ id: "newer", createdAt: puzzle.createdAt + 1 });
+      act(() => {
+        room.channel().receive("puzzle", { puzzle: newer, letters: {}, authors: {} });
+        room.result.current.restorePuzzle(puzzle);
+      });
+      await flush();
+      expect(room.result.current.board.puzzle?.id).toBe("newer");
+      expect(room.channel().sentEvents("puzzle")).toEqual([]);
+    });
+
     it("ignores a stored photo for a puzzle that was replaced meanwhile", async () => {
       const room = await goLive();
       act(() => room.result.current.publishPuzzle(makePuzzle({ id: "newer" })));

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { emptyBoard } from "@/lib/board";
 import { makePuzzle } from "@/test/fixtures";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const room = vi.hoisted(() => ({ current: null as unknown }));
@@ -20,6 +20,8 @@ function roomState(overrides: object = {}) {
     online: [],
     reactions: new Map(),
     react: vi.fn(),
+    restorePuzzle: vi.fn(),
+    attachPhoto: vi.fn(),
     board: emptyBoard,
     reconnect: vi.fn(),
     sendMessage: vi.fn(),
@@ -109,6 +111,22 @@ describe("Room", () => {
     expect(still?.getAttribute("srcset")).toBe("/banner-still.webp");
     // Decorative (empty alt), so screen readers skip it.
     expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("offers to open the linked puzzle when the room shows another, sharing it as the newest", async () => {
+    const linked = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c", createdAt: 1_000 });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(linked)));
+    const restorePuzzle = vi.fn();
+    const publishPuzzle = vi.fn();
+    room.current = roomState({ board: { puzzle: makePuzzle({ id: "today", createdAt: 2_000 }), letters: {}, authors: {} }, restorePuzzle, publishPuzzle });
+    render(<Room nickname="Nova" linkedPuzzleId={linked.id} onLeave={() => {}} />);
+
+    await waitFor(() => expect(restorePuzzle).toHaveBeenCalledWith(linked));
+    fireEvent.click(screen.getByRole("button", { name: "Öppna länkens korsord" }));
+    const shared = publishPuzzle.mock.calls[0][0];
+    expect({ ...shared, createdAt: 0 }).toEqual({ ...linked, createdAt: 0 });
+    expect(shared.createdAt).toBeGreaterThan(2_000);
+    vi.unstubAllGlobals();
   });
 
   it("shows share errors", () => {

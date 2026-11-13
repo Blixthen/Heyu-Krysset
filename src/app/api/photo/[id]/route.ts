@@ -1,6 +1,6 @@
 import { isPhotoId, photoKey, PHOTO_MIME_TYPE } from "@/lib/photo";
 import { NextResponse } from "next/server";
-import { photoBucket } from "../bucket";
+import { storageBucket } from "../../storage";
 
 /** A day: long enough for a crossword session, short next to a password change or the bucket's expiry. */
 const PHOTO_CACHE_SECONDS = 86_400;
@@ -15,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   if (!isPhotoId(id)) return NextResponse.json({ error: "Bilden finns inte." }, { status: 404 });
 
-  const bucket = await photoBucket();
+  const bucket = await storageBucket();
   if (!bucket) {
     console.error("photo: the PHOTOS bucket binding is missing");
     return NextResponse.json({ error: "Kunde inte hämta bilden." }, { status: 500 });

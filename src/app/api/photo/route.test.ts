@@ -1,4 +1,5 @@
 import { MAX_PHOTO_BYTES, photoKey } from "@/lib/photo";
+import { createFakeBucket } from "@/test/fakeBucket";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => ({ PHOTOS: undefined as unknown }));
@@ -9,21 +10,6 @@ const { GET } = await import("./[id]/route");
 
 const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 
-/** An in-memory stand-in for the R2 bucket. */
-function fakeBucket() {
-  const objects = new Map<string, { bytes: Uint8Array; contentType?: string }>();
-  return {
-    objects,
-    put: vi.fn(async (key: string, value: Uint8Array, options?: { httpMetadata?: { contentType?: string } }) => {
-      objects.set(key, { bytes: value, contentType: options?.httpMetadata?.contentType });
-    }),
-    get: vi.fn(async (key: string) => {
-      const object = objects.get(key);
-      return object ? { body: new Blob([object.bytes.slice()]).stream() } : null;
-    }),
-  };
-}
-
 function upload(body: BodyInit, headers: Record<string, string> = { "content-type": "image/jpeg" }) {
   return POST(new Request("https://kryss.test/api/photo", { method: "POST", body, headers }));
 }
@@ -32,10 +18,10 @@ function fetchPhoto(id: string) {
   return GET(new Request(`https://kryss.test/api/photo/${id}`), { params: Promise.resolve({ id }) });
 }
 
-let bucket: ReturnType<typeof fakeBucket>;
+let bucket: ReturnType<typeof createFakeBucket>;
 
 beforeEach(() => {
-  bucket = fakeBucket();
+  bucket = createFakeBucket();
   env.PHOTOS = bucket;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -45,7 +31,7 @@ describe("POST /api/photo", () => {
     const response = await upload(JPEG);
     expect(response.status).toBe(200);
     const { id } = (await response.json()) as { id: string };
-    expect(bucket.objects.get(photoKey(id))).toEqual({ bytes: JPEG, contentType: "image/jpeg" });
+    expect(bucket.objects.get(photoKey(id))).toMatchObject({ bytes: JPEG, contentType: "image/jpeg" });
   });
 
   it("rejects something that isn't a JPEG without storing it", async () => {

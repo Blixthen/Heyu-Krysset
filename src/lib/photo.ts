@@ -16,12 +16,15 @@ import type { AnalyzeFailure, Result } from "./analyze";
 export const MAX_PHOTO_BYTES = 8_000_000;
 export const PHOTO_MIME_TYPE = "image/jpeg";
 
-/** crypto.randomUUID() output, so a peer can't point the photo URL elsewhere. */
-const PHOTO_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** crypto.randomUUID() output: ids that name stored objects, so nobody can point a URL or key elsewhere. */
+const RANDOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export function isPhotoId(value: unknown): value is string {
-  return typeof value === "string" && PHOTO_ID.test(value);
+export function isRandomId(value: unknown): value is string {
+  return typeof value === "string" && RANDOM_ID.test(value);
 }
+
+/** A stored photo's id. */
+export const isPhotoId = isRandomId;
 
 /** Where the browser loads a stored photo from. */
 export function photoUrl(id: string) {

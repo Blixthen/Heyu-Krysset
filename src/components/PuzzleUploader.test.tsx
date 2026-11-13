@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { gridCells } from "@/test/fixtures";
+import { gridCells, makePuzzle } from "@/test/fixtures";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,7 @@ vi.mock("@/lib/image", () => ({ prepareImages, prepareStoreCopy }));
 const readGrid = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/gridImage", () => ({ readGrid }));
 
-const { analyzeCrossword, PuzzleUploader, storePhoto } = await import("./PuzzleUploader");
+const { analyzeCrossword, PuzzleUploader, savePuzzle, storePhoto } = await import("./PuzzleUploader");
 
 const file = new File(["x"], "kryss.jpg", { type: "image/jpeg" });
 
@@ -135,26 +135,62 @@ describe("storePhoto", () => {
   });
 });
 
+describe("savePuzzle", () => {
+  it.each([
+    ["it is stored", async () => Response.json({ id: "x" }), true],
+    ["the server refuses", async () => Response.json({ error: "x" }, { status: 409 }), false],
+    ["the request fails", () => Promise.reject(new TypeError("offline")), false],
+  ])("tells whether %s", async (_name, reply, saved) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(reply));
+    expect(await savePuzzle(makePuzzle())).toBe(saved);
+  });
+});
+
 describe("PuzzleUploader", () => {
   afterEach(cleanup);
 
-  it("shares the puzzle first, then reports the stored photo for it", async () => {
+  it("shares and saves the puzzle first, then reports the stored photo and saves it with the puzzle", async () => {
     readGrid.mockReturnValue(gridCells(2, 5));
     prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
     let finishUpload: (response: Response) => void = () => {};
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => (finishUpload = resolve))));
+    const fetchMock = vi.fn((url: string) =>
+      url === "/api/photo" ? new Promise<Response>((resolve) => (finishUpload = resolve)) : Promise.resolve(Response.json({ id: "x" })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     prepareStoreCopy.mockResolvedValue(storeBlob);
     const onPuzzle = vi.fn();
     const onPhoto = vi.fn();
     render(<PuzzleUploader onPuzzle={onPuzzle} onPhoto={onPhoto} />);
 
     fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
-    await waitFor(() => expect(onPuzzle).toHaveBeenCalledTimes(1));
-    expect(onPuzzle.mock.calls[0][0].photo).toBeUndefined();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const shared = onPuzzle.mock.calls[0][0];
+    expect(shared.photo).toBeUndefined();
+    const saves = () =>
+      (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter(([url]) => url === "/api/puzzle").map(([, init]) => JSON.parse(String(init.body)));
+    expect(saves()).toEqual([shared]);
     expect(onPhoto).not.toHaveBeenCalled();
 
     finishUpload(Response.json({ id: PHOTO_ID }));
-    await waitFor(() => expect(onPhoto).toHaveBeenCalledWith(onPuzzle.mock.calls[0][0].id, PHOTO_ID));
+    await waitFor(() => expect(onPhoto).toHaveBeenCalledWith(shared.id, PHOTO_ID));
+    await waitFor(() => expect(saves()).toEqual([shared, { ...shared, photo: PHOTO_ID }]));
+  });
+
+  it("saves the puzzle once, without a photo, when storing the photo fails", async () => {
+    readGrid.mockReturnValue(gridCells(2, 5));
+    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    prepareStoreCopy.mockResolvedValue(null);
+    const fetchMock = vi.fn(async () => Response.json({ id: "x" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onPuzzle = vi.fn();
+    render(<PuzzleUploader onPuzzle={onPuzzle} onPhoto={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
+    await waitFor(() => expect(prepareStoreCopy).toHaveBeenCalled());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/puzzle");
+    expect(JSON.parse(String(init.body))).toEqual(onPuzzle.mock.calls[0][0]);
   });
 
   it("stores nothing for a photo that couldn't be read", async () => {
