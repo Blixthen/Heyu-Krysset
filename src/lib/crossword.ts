@@ -1,3 +1,4 @@
+import { isPhotoId } from "./photo";
 import { isPlayerName } from "./players";
 
 /**
@@ -19,7 +20,10 @@ export type CrosswordPuzzle = {
   id: string;
   /** Epoch millis; the newest puzzle wins when peers disagree. */
   createdAt: number;
+  /** A small inline copy, shown at once and by tabs from before stored photos. */
   image: string;
+  /** The sharp copy in photo storage, if the upload worked; optional, since older tabs send none. */
+  photo?: string;
   cells: LetterCell[];
 };
 
@@ -106,6 +110,7 @@ export function isCrosswordPuzzle(value: unknown): value is CrosswordPuzzle {
     typeof candidate.createdAt !== "number" ||
     !Number.isFinite(candidate.createdAt) ||
     !isImageDataUrl(candidate.image) ||
+    (candidate.photo !== undefined && !isPhotoId(candidate.photo)) ||
     !Array.isArray(candidate.cells) ||
     candidate.cells.length < MIN_CELLS ||
     candidate.cells.length > MAX_CELLS ||
@@ -123,6 +128,7 @@ export function toCrosswordPuzzle(puzzle: CrosswordPuzzle): CrosswordPuzzle {
     id: puzzle.id,
     createdAt: puzzle.createdAt,
     image: puzzle.image,
+    ...(puzzle.photo === undefined ? {} : { photo: puzzle.photo }),
     cells: puzzle.cells.map(toLetterCell),
   };
 }

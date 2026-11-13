@@ -2,11 +2,15 @@
 
 import { dedupeCells, isLetterCell, MIN_CELLS, type CrosswordPuzzle, type LetterCell } from "@/lib/crossword";
 import { readGrid, type Pixels } from "@/lib/gridImage";
-import { prepareImages } from "@/lib/image";
+import { prepareImages, prepareStoreCopy } from "@/lib/image";
+import { isPhotoId } from "@/lib/photo";
 import { Camera, ImagePlus, Loader2 } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
 class UploadError extends Error {}
+
+/** How long the sharp copy (about 0.7 MB) may take to upload; the puzzle is already shared by then. */
+const STORE_TIMEOUT_MS = 60_000;
 
 type Upload = Omit<Awaited<ReturnType<typeof prepareImages>>, "pixels">;
 
@@ -22,6 +26,32 @@ export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
     image: upload.shareDataUrl,
     cells: cells ?? (await askGemini(upload)),
   };
+}
+
+/**
+ * Makes and uploads a sharp copy of the photo and returns its id, or null if
+ * that fails. Runs after the puzzle is shared, so it never delays it or
+ * competes with the Gemini request, and is skipped for a photo that couldn't
+ * be read; the inline copy still works, only less sharp.
+ */
+export async function storePhoto(file: File): Promise<string | null> {
+  const blob = await prepareStoreCopy(file);
+  if (!blob) return null;
+  try {
+    const response = await fetch("/api/photo", {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg" },
+      body: blob,
+      // The puzzle waits for this, and is fine without it, so don't wait long.
+      signal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+    });
+    const id = ((await response.json().catch(() => null)) as { id?: unknown } | null)?.id;
+    if (response.ok && isPhotoId(id)) return id;
+    console.warn("Storing the photo failed", response.status);
+  } catch (error) {
+    console.warn("Storing the photo failed", error);
+  }
+  return null;
 }
 
 /**
@@ -78,9 +108,12 @@ async function askGemini(images: Upload): Promise<LetterCell[]> {
 export function PuzzleUploader({
   compact = false,
   onPuzzle,
+  onPhoto,
 }: {
   compact?: boolean;
   onPuzzle: (puzzle: CrosswordPuzzle) => void;
+  /** The sharp copy of a shared puzzle's photo was stored. */
+  onPhoto?: (puzzleId: string, photo: string) => void;
 }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -94,7 +127,11 @@ export function PuzzleUploader({
     setIsAnalyzing(true);
     setError("");
     try {
-      onPuzzle(await analyzeCrossword(file));
+      const puzzle = await analyzeCrossword(file);
+      onPuzzle(puzzle);
+      void storePhoto(file).then((photo) => {
+        if (photo) onPhoto?.(puzzle.id, photo);
+      });
     } catch (failure) {
       if (!(failure instanceof UploadError)) console.error(failure);
       setError(failure instanceof UploadError ? failure.message : "Något gick fel. Försök igen.");

@@ -323,6 +323,35 @@ describe("useCrosswordRoom", () => {
       expect(room.result.current.board.puzzle).toBe(puzzle);
     });
 
+    it("attaches a stored photo to the current puzzle and shares the board again", async () => {
+      const PHOTO = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(puzzle));
+      await flush();
+      // The uploader calls back with the function it had before the puzzle loaded.
+      const attachPhoto = room.result.current.attachPhoto;
+      act(() => room.result.current.setLetter(0, 0, "a"));
+      act(() => attachPhoto(puzzle.id, PHOTO));
+      await flush();
+      expect(room.result.current.board.puzzle?.photo).toBe(PHOTO);
+      expect(room.channel().sentEvents("puzzle").at(-1)).toEqual({
+        puzzle: { ...puzzle, photo: PHOTO },
+        letters: { "0-0": "A" },
+        authors: { "0-0": "Nova" },
+      });
+    });
+
+    it("ignores a stored photo for a puzzle that was replaced meanwhile", async () => {
+      const room = await goLive();
+      act(() => room.result.current.publishPuzzle(makePuzzle({ id: "newer" })));
+      await flush();
+      const sent = room.channel().sentEvents("puzzle").length;
+      act(() => room.result.current.attachPhoto(puzzle.id, "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c"));
+      await flush();
+      expect(room.result.current.board.puzzle?.photo).toBeUndefined();
+      expect(room.channel().sentEvents("puzzle")).toHaveLength(sent);
+    });
+
     it("shows an error when the puzzle broadcast is rejected (e.g. too large)", async () => {
       const room = await goLive();
       room.channel().sendResult = "error";

@@ -12,6 +12,8 @@ export type BoardAction =
   | { type: "load"; puzzle: CrosswordPuzzle }
   /** A peer shared its puzzle state. */
   | { type: "remote-puzzle"; puzzle: CrosswordPuzzle; letters: Letters; authors: Authors }
+  /** This client stored the puzzle's photo. */
+  | { type: "photo"; puzzleId: string; photo: string }
   /** A letter was typed, locally or by a peer. */
   | { type: "letter"; puzzleId: string; row: number; col: number; value: string; author?: string };
 
@@ -33,13 +35,20 @@ function authorsFor(letters: Letters, ours: Board, theirs: { letters: Letters; a
   return authors;
 }
 
+/** The puzzle with a stored photo filled in if it has none; a photo is never replaced. */
+function withPhoto(puzzle: CrosswordPuzzle, photo: string | undefined) {
+  return photo === undefined || puzzle.photo !== undefined ? puzzle : { ...puzzle, photo };
+}
+
 /**
  * Pure state transitions for the shared board. Without a server-side source of
  * truth, peers reconcile with two rules:
  * - a different puzzle only replaces ours if it is newer, so a peer that
  *   reconnects with an old puzzle cannot roll everyone back;
  * - the same puzzle merges letters, keeping our own where both have a value,
- *   so a late sync can never wipe out letters typed in the meantime.
+ *   so a late sync can never wipe out letters typed in the meantime, and
+ *   takes their stored photo if ours has none: the uploader shares the puzzle
+ *   before its photo is stored, and a tab from before stored photos drops it.
  */
 export function boardReducer(state: Board, action: BoardAction): Board {
   switch (action.type) {
@@ -50,10 +59,17 @@ export function boardReducer(state: Board, action: BoardAction): Board {
       const current = state.puzzle;
       if (current && current.id === action.puzzle.id) {
         const letters = { ...action.letters, ...state.letters };
-        return { puzzle: current, letters, authors: authorsFor(letters, state, action) };
+        return { puzzle: withPhoto(current, action.puzzle.photo), letters, authors: authorsFor(letters, state, action) };
       }
       if (current && action.puzzle.createdAt <= current.createdAt) return state;
       return { puzzle: action.puzzle, letters: action.letters, authors: authorsFor(action.letters, emptyBoard, action) };
+    }
+
+    case "photo": {
+      const puzzle = state.puzzle;
+      if (!puzzle || puzzle.id !== action.puzzleId) return state;
+      const next = withPhoto(puzzle, action.photo);
+      return next === puzzle ? state : { ...state, puzzle: next };
     }
 
     case "letter": {

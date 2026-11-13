@@ -6,5 +6,7 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "heyu-krysset" }],
+  // Crossword photos (src/app/api/photo). Objects expire through the bucket's lifecycle rule; see README.
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "heyu" }],
   "observability": { "enabled": true }
 }

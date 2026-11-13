@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareImages, SHARE_IMAGE_BUDGET } from "./image";
+import { prepareImages, prepareStoreCopy, SHARE_IMAGE_BUDGET } from "./image";
 
 /**
  * jsdom has no canvas encoder, so we fake one whose output size grows with
@@ -18,7 +18,18 @@ function fakeCanvas(bytesPerPixel: number) {
     const length = Math.round(this.width * this.height * bytesPerPixel * (quality as number));
     return `data:image/jpeg;base64,${"A".repeat(length)}`;
   });
-  return renders;
+  const blobs = fakeBlobs();
+  return Object.assign(renders, { blobs });
+}
+
+/** jsdom's toBlob never calls back; record what was asked for and hand back a blob. */
+function fakeBlobs(blob: Blob | null = new Blob(["jpeg"], { type: "image/jpeg" })) {
+  const blobs: { width: number; type?: string; quality?: unknown }[] = [];
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (this: HTMLCanvasElement, callback, type, quality) {
+    blobs.push({ width: this.width, type, quality });
+    callback(blob);
+  });
+  return blobs;
 }
 
 const close = vi.fn();
@@ -53,6 +64,7 @@ describe("prepareImages", () => {
       },
     } as never);
     vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,AAAA");
+    fakeBlobs();
     const images = await prepareImages(file);
     expect(images.pixels).toBeNull();
     expect(images.analyzeBase64).toBe("AAAA");
@@ -76,5 +88,42 @@ describe("prepareImages", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     await expect(prepareImages(file)).rejects.toThrow();
     expect(close).toHaveBeenCalled();
+  });
+});
+
+describe("prepareStoreCopy", () => {
+  const bitmap = (width: number, height: number) => vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close })));
+
+  it("makes a sharp JPEG at most 3000px wide", async () => {
+    bitmap(5712, 4284);
+    const { blobs } = fakeCanvas(0.01);
+    const blob = await prepareStoreCopy(file);
+    expect(blobs).toEqual([{ width: 3000, type: "image/jpeg", quality: 0.8 }]);
+    expect(blob?.type).toBe("image/jpeg");
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("keeps a smaller photo at its own size", async () => {
+    const { blobs } = fakeCanvas(0.01);
+    await prepareStoreCopy(file);
+    expect(blobs[0].width).toBe(2000);
+  });
+
+  it("caps the pixels of a tall photo, not only its width", async () => {
+    bitmap(2000, 12_000);
+    const { blobs } = fakeCanvas(0.01);
+    await prepareStoreCopy(file);
+    // 12M pixels at 1:6 is about 1414 × 8485.
+    expect(blobs[0].width).toBe(1414);
+  });
+
+  it.each([
+    ["the canvas can't be made", () => vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)],
+    ["the browser can't encode it", () => fakeBlobs(null)],
+    ["the photo can't be decoded", () => vi.stubGlobal("createImageBitmap", vi.fn(async () => Promise.reject(new Error("bad"))))],
+  ])("gives null instead of failing when %s", async (_name, breakIt) => {
+    fakeCanvas(0.01);
+    breakIt();
+    await expect(prepareStoreCopy(file)).resolves.toBeNull();
   });
 });

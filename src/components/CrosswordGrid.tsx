@@ -16,6 +16,7 @@ import {
   type LetterCell,
   type Letters,
 } from "@/lib/crossword";
+import { photoUrl } from "@/lib/photo";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { PLAYER_COLOURS } from "./PlayerLegend";
 
@@ -56,6 +57,7 @@ export function CrosswordGrid({
   // arrow keys and tapping the selected cell again change it. The ref holds the
   // latest value for focus handlers that run before React re-renders.
   const [direction, setDirectionState] = useState<Direction>("across");
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   const directionRef = useRef<Direction>("across");
   // Whether the cell being tapped already had focus, so a tap can switch direction.
   const wasFocused = useRef(false);
@@ -124,6 +126,16 @@ export function CrosswordGrid({
         {/* A data: URL from a peer; next/image cannot optimize it. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={puzzle.image} alt="Korsordet" className="block h-auto w-full select-none" />
+        {/* The sharp stored copy covers the inline one once it loads, and stays hidden if it can't. */}
+        {puzzle.photo && failedPhoto !== puzzle.photo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photoUrl(puzzle.photo)}
+            alt=""
+            className="absolute inset-0 size-full select-none"
+            onError={() => setFailedPhoto(puzzle.photo ?? null)}
+          />
+        ) : null}
         {puzzle.cells.map((cell) => {
           const key = cellKey(cell.row, cell.col);
           const isSelected = selectedCell?.row === cell.row && selectedCell?.col === cell.col;

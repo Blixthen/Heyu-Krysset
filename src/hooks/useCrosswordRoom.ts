@@ -308,6 +308,27 @@ export function useCrosswordRoom(nickname: string) {
     [broadcastPuzzle],
   );
 
+  // The uploader reports the stored photo seconds after sharing the puzzle,
+  // from a callback made back then, so read the board as it is now.
+  const boardRef = useRef(board);
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
+
+  const attachPhoto = useCallback(
+    (puzzleId: string, photo: string) => {
+      const { puzzle, letters, authors } = boardRef.current;
+      // A newer puzzle replaced this one meanwhile, or it has its photo already.
+      if (!puzzle || puzzle.id !== puzzleId || puzzle.photo !== undefined) return;
+      dispatch({ type: "photo", puzzleId, photo });
+      // Peers take the photo from a full board for the same puzzle. If we are
+      // offline, it goes out with the board when the channel subscribes.
+      const channel = channelRef.current;
+      if (channel) void broadcastPuzzle(channel, { ...puzzle, photo }, letters, authors);
+    },
+    [broadcastPuzzle],
+  );
+
   const puzzleId = board.puzzle?.id;
   const setLetter = useCallback(
     (row: number, col: number, value: string) => {
@@ -341,6 +362,7 @@ export function useCrosswordRoom(nickname: string) {
     reconnect,
     sendMessage,
     publishPuzzle,
+    attachPhoto,
     setLetter,
   };
 }

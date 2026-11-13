@@ -16,6 +16,35 @@ describe("boardReducer", () => {
     expect(next.authors).toEqual({});
   });
 
+  describe("stored photo", () => {
+    const PHOTO = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+    const OTHER = "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+    it("fills in a photo from a peer's copy of the same puzzle, keeping our letters", () => {
+      const next = boardReducer(withLetters({ "0-0": "A" }), {
+        type: "remote-puzzle",
+        puzzle: makePuzzle({ photo: PHOTO }),
+        letters: {},
+        authors: {},
+      });
+      expect(next.puzzle?.photo).toBe(PHOTO);
+      expect(next.letters).toEqual({ "0-0": "A" });
+    });
+
+    it("never replaces a photo we have, nor drops it for a peer's copy without one", () => {
+      const state: Board = { puzzle: makePuzzle({ photo: PHOTO }), letters: {}, authors: {} };
+      const other = boardReducer(state, { type: "remote-puzzle", puzzle: makePuzzle({ photo: OTHER }), letters: {}, authors: {} });
+      const none = boardReducer(state, { type: "remote-puzzle", puzzle: makePuzzle(), letters: {}, authors: {} });
+      expect([other.puzzle?.photo, none.puzzle?.photo]).toEqual([PHOTO, PHOTO]);
+    });
+
+    it("attaches our own stored photo to the current puzzle only", () => {
+      expect(boardReducer(withLetters({}), { type: "photo", puzzleId: puzzle.id, photo: PHOTO }).puzzle?.photo).toBe(PHOTO);
+      const state = withLetters({});
+      expect(boardReducer(state, { type: "photo", puzzleId: "older", photo: PHOTO })).toBe(state);
+    });
+  });
+
   describe("remote-puzzle", () => {
     it("adopts a puzzle when we have none", () => {
       const next = boardReducer(emptyBoard, { type: "remote-puzzle", puzzle, letters: { "0-0": "A" }, authors: { "0-0": "Kim" } });

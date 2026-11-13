@@ -217,3 +217,27 @@ describe("CrosswordGrid", () => {
     expect(document.activeElement).toBe(cell(0, 2));
   });
 });
+
+describe("CrosswordGrid photo", () => {
+  afterEach(cleanup);
+  const PHOTO_ID = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
+  const sharp = (container: HTMLElement) => container.querySelector(`img[src="/api/photo/${PHOTO_ID}"]`);
+
+  it("shows the inline copy, with the stored photo over it", () => {
+    const { container } = render(<Harness puzzle={makePuzzle({ photo: PHOTO_ID })} />);
+    expect(screen.getByAltText("Korsordet").getAttribute("src")).toBe(puzzle.image);
+    expect(sharp(container)).not.toBeNull();
+  });
+
+  it("falls back to the inline copy when the stored photo can't load", () => {
+    const { container } = render(<Harness puzzle={makePuzzle({ photo: PHOTO_ID })} />);
+    fireEvent.error(sharp(container)!);
+    expect(sharp(container)).toBeNull();
+    expect(screen.getByAltText("Korsordet")).toBeTruthy();
+  });
+
+  it("shows only the inline copy for a puzzle without a stored photo", () => {
+    const { container } = render(<Harness />);
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+  });
+});

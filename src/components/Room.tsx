@@ -64,7 +64,7 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
-          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} /> : null}
+          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} onPhoto={room.attachPhoto} /> : null}
           <button
             type="button"
             onClick={onLeave}
@@ -101,7 +101,7 @@ export function Room({ nickname, onLeave }: { nickname: string; onLeave: () => v
               </div>
             </div>
           ) : (
-            <PuzzleUploader onPuzzle={onPuzzle} />
+            <PuzzleUploader onPuzzle={onPuzzle} onPhoto={room.attachPhoto} />
           )}
         </section>
 
