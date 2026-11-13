@@ -85,6 +85,7 @@ describe("isCrosswordPuzzle", () => {
     ["non-numeric createdAt", { createdAt: "now" }],
     ["non-image data URL", { image: "data:text/html;base64,AAAA" }],
     ["photo that isn't a photo id", { photo: "../secret" }],
+    ["restartOf that isn't a puzzle id", { restartOf: "../secret" }],
     ["too few cells", { cells: gridCells(2, 2) }],
     ["invalid cell", { cells: [...gridCells().slice(1), { row: 0 }] }],
     ["duplicate cells", { cells: [...gridCells(), gridCells()[0]] }],
@@ -94,6 +95,12 @@ describe("isCrosswordPuzzle", () => {
 
   it("accepts a puzzle with a stored photo, and keeps it when copying", () => {
     const puzzle = makePuzzle({ photo: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
+    expect(isCrosswordPuzzle(puzzle)).toBe(true);
+    expect(toCrosswordPuzzle(puzzle)).toEqual(puzzle);
+  });
+
+  it("accepts a puzzle that starts another over, and keeps that when copying", () => {
+    const puzzle = makePuzzle({ restartOf: "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d" });
     expect(isCrosswordPuzzle(puzzle)).toBe(true);
     expect(toCrosswordPuzzle(puzzle)).toEqual(puzzle);
   });

@@ -61,3 +61,14 @@ export function safeNextPath(value: unknown) {
   const id = value.startsWith("/p/") ? value.slice(3) : null;
   return id !== null && isRandomId(id) ? puzzlePath(id) : "/";
 }
+
+/**
+ * The same crossword started over: the squares, image and photo under a new
+ * id, so it gets no letters and its own link, while the old link keeps the old
+ * letters. Newer than the original, so it replaces it in every tab. It names
+ * the first puzzle it starts over, so a photo still being stored for that one
+ * reaches it (boardReducer's "photo").
+ */
+export function restartedPuzzle(puzzle: CrosswordPuzzle, id: string, now: number): CrosswordPuzzle {
+  return { ...puzzle, id, createdAt: Math.max(now, puzzle.createdAt + 1), restartOf: puzzle.restartOf ?? puzzle.id };
+}
