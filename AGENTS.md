@@ -36,7 +36,7 @@ CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests and the OpenNext bui
 
 ## Architecture
 
-There is no database and no server-side room state. The server does three things: it gates access, hands out the realtime channel name, and proxies photo analysis to Gemini when the browser can't read the grid itself. Everything else happens between browsers over Supabase Realtime broadcast.
+There is no database and no server-side room state. The server does four things: it gates access, hands out the realtime channel name, proxies photo analysis to Gemini when the browser can't read the grid itself, and stores crossword photos in R2. Everything else happens between browsers over Supabase Realtime broadcast.
 
 **Password gate.** `src/proxy.ts` (Next 16's replacement for `middleware.ts`) lets only `/login` and `/api/unlock` through without the `heyu_gate` cookie, which is an HMAC of `APP_PASSWORD` (`src/lib/gate.ts`). Changing the password invalidates every cookie and also changes the room topic.
 
@@ -44,11 +44,13 @@ There is no database and no server-side room state. The server does three things
 
 **Sync protocol** (`src/hooks/useCrosswordRoom.ts`). Broadcast events are `message`, `puzzle` (full board: puzzle, letters, and who typed each), `cell-update` (one letter and its author), `sync-request` and `reaction` (one player adding or removing an emoji on a chat message). Each client also tracks `{ nickname }` with Supabase Presence, keyed by its client id, so everyone in the room gets a player colour before they type. On subscribe, a client broadcasts its board and sends `sync-request`; peers answer after a random jitter, and the rest cancel when they see an answer. Reconnects use exponential backoff, and a 401 from `/api/room` sends the user to `/login`.
 
-**Conflict resolution** lives in the pure `boardReducer` (`src/lib/board.ts`): a different puzzle replaces ours only if its `createdAt` is newer, and the same puzzle merges letters with local values winning, each letter keeping its own author. Authors are optional, because tabs from before they existed send none. Keep these rules there, not in the hook.
+**Conflict resolution** lives in the pure `boardReducer` (`src/lib/board.ts`): a different puzzle replaces ours only if its `createdAt` is newer, and the same puzzle merges letters with local values winning, each letter keeping its own author, and takes a peer's stored photo id if ours has none. Authors are optional, because tabs from before they existed send none. Keep these rules there, not in the hook.
 
 **Untrusted payloads.** Every peer payload is validated and copied field by field before use (`isChatMessage`/`toChatMessage` in `src/lib/chat.ts`, `isReaction`/`toReaction` in `src/lib/reactions.ts`, `onlineNames` in `src/lib/players.ts` for presence, `isCrosswordPuzzle`/`toCrosswordPuzzle`/`isCellUpdate`/`authorsFromPayload` in `src/lib/crossword.ts`). The same crossword validators check Gemini's output on the server, so that module and `src/lib/players.ts`, which it imports, must stay runtime-agnostic.
 
 **Photo flow.** `src/lib/image.ts` prepares the photo in the browser: the pixels of the analysis-size image, the same image as a JPEG for Gemini, and a smaller JPEG, under `SHARE_IMAGE_BUDGET`, to broadcast, because Supabase limits broadcast payload size. `readGrid` (`src/lib/gridImage.ts`) reads the letter squares from the pixels in the browser, which keeps the work off the Worker's 10 ms CPU budget. Only when it finds no usable grid does `PuzzleUploader` call `/api/analyze-crossword`, so every request there is a photo the grid reading missed. The route sends the photo and `ANALYZE_PROMPT` (`src/lib/analyze.ts`) to Gemini and returns validated letter cells in 0–1000 coordinates relative to the image. The decisions (request validation, the Gemini request, interpreting the reply) are pure functions in `src/lib/analyze.ts` that return a `Result`; the route only calls Gemini, logs and responds. Only `AnalyzeFailure` messages reach users; SDK errors and rejected model output are logged.
+
+**Stored photos.** The broadcast copy is too small to read clue text when zoomed, so once the puzzle is shared, `PuzzleUploader` makes a sharp JPEG (`prepareStoreCopy` in `src/lib/image.ts`, capped in width and pixels) and uploads it to `POST /api/photo`, which checks it (`checkPhotoUpload` in `src/lib/photo.ts`) and stores it in the R2 bucket bound as `PHOTOS` (`wrangler.jsonc`). The hook's `attachPhoto` adds its id to the puzzle's optional `photo` field and shares the board again; `CrosswordGrid` loads it from `GET /api/photo/<id>` over the inline copy, and keeps the inline copy if it fails. Both routes are behind the password gate. The puzzle never waits for the upload and works without it. Photos expire through the bucket's lifecycle rule (README "Deploying").
 
 ## Cloudflare Workers constraints
 
@@ -67,6 +69,7 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 | A dependency that wants an install script | `pnpm install` stops with `ERR_PNPM_IGNORED_BUILDS`. Allow or deny it under `allowBuilds` in `pnpm-workspace.yaml`; only allow what the build or runtime needs |
 | A realtime event or payload shape | Update its validator and copy function, `boardReducer` if it affects the board, and the hook tests. See "Compatibility" below |
 | A route that must work without the password | Add it to `PUBLIC_PATHS` in `src/proxy.ts`, plus a test in `src/proxy.test.ts` |
+| A Worker binding (`wrangler.jsonc`, such as the `PHOTOS` R2 bucket) | Its type in `src/cloudflare-env.d.ts`, and the README "Deploying" section if it needs creating in Cloudflare first |
 | An environment variable | `.env.example`, the README "Deploying" section, and where it is set: GitHub Actions variables for `NEXT_PUBLIC_*` (and the build steps in both workflows), `wrangler secret put` for runtime secrets |
 | `next.config.ts`, `proxy.ts`, or Next/OpenNext/wrangler versions | `pnpm preview` and check the login gate and the home page on the Workers runtime; `next build` passing does not prove it runs there |
 | The Gemini prompt or cell parsing | `src/lib/analyze.test.ts`; Gemini output is untrusted input like any peer payload. Then run `pnpm eval:record` and commit the updated `*.reply.json` files, so the photo replay tests reflect what the model now returns |
@@ -93,7 +96,7 @@ Built with `@opennextjs/cloudflare` (`open-next.config.ts`, `wrangler.jsonc`).
 ## Security defaults
 
 - **Fail closed.** A missing `APP_PASSWORD` or an unreadable cookie means locked, never open.
-- **Bound everything a caller controls**: message length, list sizes, cell counts, image size (`MAX_MESSAGE_LENGTH`, `MAX_MESSAGES`, `MAX_CELLS`, `MAX_IMAGE_BASE64_LENGTH`).
+- **Bound everything a caller controls**: message length, list sizes, cell counts, image size (`MAX_MESSAGE_LENGTH`, `MAX_MESSAGES`, `MAX_CELLS`, `MAX_IMAGE_BASE64_LENGTH`, `MAX_PHOTO_BYTES`).
 - **Never show raw errors** from Gemini, Supabase or the runtime to users. Log them and show a generic Swedish message; only put messages that are safe to show in an `AnalyzeFailure`.
 - **Secrets stay server-side.** Only `NEXT_PUBLIC_*` values reach the browser, and the Supabase key must be the publishable one. Anything derived from `APP_PASSWORD` must not be prerendered into build output.
 
