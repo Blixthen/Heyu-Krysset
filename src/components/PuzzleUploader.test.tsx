@@ -5,21 +5,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prepareImages = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/image", () => ({ prepareImages }));
+const readGrid = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/gridImage", () => ({ readGrid }));
 
 const { analyzeCrossword, PuzzleUploader } = await import("./PuzzleUploader");
 
 const file = new File(["x"], "kryss.jpg", { type: "image/jpeg" });
 
+const pixels = { width: 2, height: 1, data: new Uint8ClampedArray(8) };
+
 describe("analyzeCrossword", () => {
   beforeEach(() => {
+    readGrid.mockReset().mockReturnValue(null);
+    vi.spyOn(console, "info").mockImplementation(() => {});
     prepareImages.mockResolvedValue({
+      pixels,
       analyzeBase64: "HIGHRES",
       mimeType: "image/jpeg",
       shareDataUrl: "data:image/jpeg;base64,SMALL",
     });
   });
 
-  it("sends the high-quality image to Gemini and shares the small one", async () => {
+  it("reads the grid in the browser without calling Gemini", async () => {
+    const cells = gridCells(2, 5);
+    readGrid.mockReturnValue(cells);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const puzzle = await analyzeCrossword(file);
+
+    expect(readGrid).toHaveBeenCalledWith(pixels);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(puzzle.cells).toEqual(cells);
+    expect(puzzle.image).toBe("data:image/jpeg;base64,SMALL");
+  });
+
+  it("asks Gemini without reading the grid when the browser gave no pixels", async () => {
+    prepareImages.mockResolvedValue({ pixels: null, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    const cells = gridCells(2, 4);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ cells })));
+
+    expect((await analyzeCrossword(file)).cells).toEqual(cells);
+    expect(readGrid).not.toHaveBeenCalled();
+  });
+
+  it("asks Gemini when the grid reading fails with an error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    readGrid.mockImplementation(() => {
+      throw new RangeError("bug");
+    });
+    const cells = gridCells(3, 3);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ cells })));
+
+    expect((await analyzeCrossword(file)).cells).toEqual(cells);
+    expect(consoleError).toHaveBeenCalledWith(expect.any(RangeError));
+  });
+
+  it("sends the high-quality image to Gemini when no grid is found, and shares the small one", async () => {
     const cells = gridCells();
     const fetchMock = vi.fn(async () => Response.json({ cells: [...cells, cells[0]] }));
     vi.stubGlobal("fetch", fetchMock);

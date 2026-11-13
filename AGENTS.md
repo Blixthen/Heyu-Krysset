@@ -36,7 +36,7 @@ CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests and the OpenNext bui
 
 ## Architecture
 
-There is no database and no server-side room state. The server does three things: it gates access, hands out the realtime channel name, and proxies photo analysis to Gemini. Everything else happens between browsers over Supabase Realtime broadcast.
+There is no database and no server-side room state. The server does three things: it gates access, hands out the realtime channel name, and proxies photo analysis to Gemini when the browser can't read the grid itself. Everything else happens between browsers over Supabase Realtime broadcast.
 
 **Password gate.** `src/proxy.ts` (Next 16's replacement for `middleware.ts`) lets only `/login` and `/api/unlock` through without the `heyu_gate` cookie, which is an HMAC of `APP_PASSWORD` (`src/lib/gate.ts`). Changing the password invalidates every cookie and also changes the room topic.
 
@@ -48,7 +48,7 @@ There is no database and no server-side room state. The server does three things
 
 **Untrusted payloads.** Every peer payload is validated and copied field by field before use (`isChatMessage`/`toChatMessage` in `src/lib/chat.ts`, `isCrosswordPuzzle`/`toCrosswordPuzzle`/`isCellUpdate` in `src/lib/crossword.ts`). The same crossword validators check Gemini's output on the server, so that module must stay runtime-agnostic.
 
-**Photo flow.** `src/lib/image.ts` makes two JPEGs in the browser: a larger one for Gemini and a smaller one, under `SHARE_IMAGE_BUDGET`, to broadcast, because Supabase limits broadcast payload size. `/api/analyze-crossword` sends the photo and `ANALYZE_PROMPT` (`src/lib/analyze.ts`) to Gemini and returns validated letter cells in 0–1000 coordinates relative to the image. The decisions (request validation, the Gemini request, interpreting the reply) are pure functions in `src/lib/analyze.ts` that return a `Result`; the route only calls Gemini, logs and responds. Only `AnalyzeFailure` messages reach users; SDK errors and rejected model output are logged.
+**Photo flow.** `src/lib/image.ts` prepares the photo in the browser: the pixels of the analysis-size image, the same image as a JPEG for Gemini, and a smaller JPEG, under `SHARE_IMAGE_BUDGET`, to broadcast, because Supabase limits broadcast payload size. `readGrid` (`src/lib/gridImage.ts`) reads the letter squares from the pixels in the browser, which keeps the work off the Worker's 10 ms CPU budget. Only when it finds no usable grid does `PuzzleUploader` call `/api/analyze-crossword`, so every request there is a photo the grid reading missed. The route sends the photo and `ANALYZE_PROMPT` (`src/lib/analyze.ts`) to Gemini and returns validated letter cells in 0–1000 coordinates relative to the image. The decisions (request validation, the Gemini request, interpreting the reply) are pure functions in `src/lib/analyze.ts` that return a `Result`; the route only calls Gemini, logs and responds. Only `AnalyzeFailure` messages reach users; SDK errors and rejected model output are logged.
 
 ## Cloudflare Workers constraints
 

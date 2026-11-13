@@ -1,7 +1,7 @@
 # Heyus Fredagskryss
 
 Solve a crossword together in real time. One person photographs the puzzle,
-Gemini finds the letter squares, and everyone in the room types into the same
+the app finds the letter squares, and everyone in the room types into the same
 grid and chats alongside it.
 
 ## Getting started
@@ -57,8 +57,10 @@ use `pnpm preview`.
   `APP_PASSWORD`.
 - **Room**: clients fetch the realtime channel name from `/api/room` (behind
   the gate), so the public Supabase anon key alone is not enough to join.
-- **Analysis**: `/api/analyze-crossword` sends the photo to Gemini and returns
-  validated letter cells (`src/lib/analyze.ts`).
+- **Analysis**: the browser reads the letter squares from the photo's pixels
+  (`src/lib/gridImage.ts`). If it finds no grid, `/api/analyze-crossword`
+  sends the photo to Gemini and returns validated letter cells
+  (`src/lib/analyze.ts`).
 - **Sync**: peers exchange chat messages, letters and the puzzle over Supabase
   Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). Nothing is stored on a
   server; when a client joins it asks the room for the current puzzle. The

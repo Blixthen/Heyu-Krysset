@@ -8,7 +8,11 @@ import { prepareImages, SHARE_IMAGE_BUDGET } from "./image";
  */
 function fakeCanvas(bytesPerPixel: number) {
   const renders: { width: number; quality: number }[] = [];
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+    const { width } = this;
+    const getImageData = (_x: number, _y: number, w: number, h: number) => ({ width: w, height: h, from: width });
+    return { drawImage: vi.fn(), getImageData } as never;
+  });
   vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(function (this: HTMLCanvasElement, _type, quality) {
     renders.push({ width: this.width, quality: quality as number });
     const length = Math.round(this.width * this.height * bytesPerPixel * (quality as number));
@@ -33,6 +37,25 @@ describe("prepareImages", () => {
     expect(renders[0]).toEqual({ width: 1400, quality: 0.82 });
     expect(images.mimeType).toBe("image/jpeg");
     expect(images.analyzeBase64).not.toContain("data:");
+  });
+
+  it("reads the pixels of the analysis image", async () => {
+    fakeCanvas(0.01);
+    const images = await prepareImages(file);
+    expect(images.pixels).toEqual({ width: 1400, height: 1960, from: 1400 });
+  });
+
+  it("still prepares the JPEGs when the browser refuses to hand out pixels", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: () => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,AAAA");
+    const images = await prepareImages(file);
+    expect(images.pixels).toBeNull();
+    expect(images.analyzeBase64).toBe("AAAA");
   });
 
   it("uses the best share quality that fits the budget", async () => {

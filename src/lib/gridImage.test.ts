@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySquares, findGrid, toLetterCells, type Pixels } from "./gridImage";
+import { classifySquares, findGrid, readGrid, toLetterCells, type Pixels } from "./gridImage";
 
 /** A synthetic bildkorsord page: 8×8 squares of SIZE px with a MARGIN, lines LINE px wide. */
 const SIZE = 40;
@@ -146,5 +146,25 @@ describe("toLetterCells", () => {
     const cells = toLetterCells(pixels, grid, classifySquares(pixels, grid));
     expect(cells).toHaveLength(COUNT * COUNT - 1);
     expect(cells[0]).toEqual({ row: 0, col: 0, x: 56, y: 56, w: 111, h: 111 });
+  });
+});
+
+describe("readGrid", () => {
+  it("reads every letter square of a grid", () => {
+    const cells = readGrid(new Page(20).paint(0, 1, text).paint(2, 2, grey).pixels());
+    expect(cells).toHaveLength(COUNT * COUNT - 2);
+    expect(cells?.[0]).toEqual({ row: 0, col: 0, x: 56, y: 56, w: 111, h: 111 });
+  });
+
+  it("returns null for a page without a grid", () => {
+    expect(readGrid({ width: 200, height: 200, data: new Uint8ClampedArray(200 * 200 * 4).fill(WHITE) })).toBeNull();
+  });
+
+  it("returns null when too few squares are blank to be a crossword", () => {
+    const page = new Page(20);
+    for (let row = 0; row < COUNT; row += 1) {
+      for (let col = 0; col < COUNT; col += 1) if (row > 0 || col > 6) page.paint(row, col, text);
+    }
+    expect(readGrid(page.pixels())).toBeNull();
   });
 });
