@@ -3,15 +3,18 @@
 import { boardReducer, emptyBoard } from "@/lib/board";
 import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, toChatMessage, type ChatMessage } from "@/lib/chat";
 import {
+  authorsFromPayload,
   isCellUpdate,
   isCrosswordPuzzle,
   lettersFromPayload,
   oneLetter,
   toCrosswordPuzzle,
   type CellUpdate,
+  type Authors,
   type CrosswordPuzzle,
   type Letters,
 } from "@/lib/crossword";
+import { isPlayerName } from "@/lib/players";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
@@ -23,8 +26,8 @@ export type DisplayMessage = ChatMessage & { failed?: boolean };
 /**
  * Realtime events on the room channel:
  * - "message":      a ChatMessage
- * - "puzzle":       { puzzle, letters }, the sender's full board
- * - "cell-update":  a CellUpdate for one letter
+ * - "puzzle":       { puzzle, letters, authors }, the sender's full board
+ * - "cell-update":  a CellUpdate for one letter and who typed it
  * - "sync-request": sent by a client that just (re)joined; one peer answers with "puzzle"
  */
 const MAX_RETRIES = 4;
@@ -69,11 +72,11 @@ export function useCrosswordRoom(nickname: string) {
   const goToLogin = useEffectEvent(() => router.replace("/login"));
 
   const broadcastPuzzle = useCallback(
-    async (channel: RealtimeChannel, puzzle: CrosswordPuzzle, letters: Letters) => {
+    async (channel: RealtimeChannel, puzzle: CrosswordPuzzle, letters: Letters, authors: Authors) => {
       const result = await channel.send({
         type: "broadcast",
         event: "puzzle",
-        payload: { puzzle, letters },
+        payload: { puzzle, letters, authors },
       });
       setShareError(result === "ok" ? "" : SHARE_ERROR);
     },
@@ -154,12 +157,13 @@ export function useCrosswordRoom(nickname: string) {
             type: "remote-puzzle",
             puzzle,
             letters: lettersFromPayload((payload as { letters?: unknown }).letters, puzzle.cells),
+            authors: authorsFromPayload((payload as { authors?: unknown }).authors, puzzle.cells),
           });
         })
         .on("broadcast", { event: "cell-update" }, ({ payload }) => {
           if (!isCellUpdate(payload)) return;
-          const { puzzleId, row, col, value } = payload;
-          dispatch({ type: "letter", puzzleId, row, col, value });
+          const { puzzleId, row, col, value, author } = payload;
+          dispatch({ type: "letter", puzzleId, row, col, value, author });
         })
         .on("broadcast", { event: "sync-request" }, () => {
           if (!readBoard().puzzle) return;
@@ -169,8 +173,8 @@ export function useCrosswordRoom(nickname: string) {
           window.clearTimeout(syncTimer);
           syncTimer = window.setTimeout(
             () => {
-              const { puzzle, letters } = readBoard();
-              if (puzzle && channelRef.current === channel) void broadcastPuzzle(channel, puzzle, letters);
+              const { puzzle, letters, authors } = readBoard();
+              if (puzzle && channelRef.current === channel) void broadcastPuzzle(channel, puzzle, letters, authors);
             },
             min + Math.random() * (max - min),
           );
@@ -184,8 +188,8 @@ export function useCrosswordRoom(nickname: string) {
             setStatus("live");
             // Share what we have (peers keep the newest puzzle and merge letters),
             // then ask for anything newer.
-            const { puzzle, letters } = readBoard();
-            if (puzzle) void broadcastPuzzle(channel, puzzle, letters);
+            const { puzzle, letters, authors } = readBoard();
+            if (puzzle) void broadcastPuzzle(channel, puzzle, letters, authors);
             void channel.send({ type: "broadcast", event: "sync-request", payload: {} });
             return;
           }
@@ -248,7 +252,7 @@ export function useCrosswordRoom(nickname: string) {
       setShareError("");
       // If we are offline, the puzzle is shared when the channel subscribes.
       const channel = channelRef.current;
-      if (channel) void broadcastPuzzle(channel, puzzle, {});
+      if (channel) void broadcastPuzzle(channel, puzzle, {}, {});
     },
     [broadcastPuzzle],
   );
@@ -257,11 +261,13 @@ export function useCrosswordRoom(nickname: string) {
   const setLetter = useCallback(
     (row: number, col: number, value: string) => {
       if (!puzzleId) return;
-      const update: CellUpdate = { puzzleId, row, col, value: oneLetter(value) };
+      // A peer drops an update whose author fails validation, so leave a bad nickname out.
+      const author = isPlayerName(nickname) ? nickname : undefined;
+      const update: CellUpdate = { puzzleId, row, col, value: oneLetter(value), author };
       dispatch({ type: "letter", ...update });
       void channelRef.current?.send({ type: "broadcast", event: "cell-update", payload: update });
     },
-    [puzzleId],
+    [puzzleId, nickname],
   );
 
   const configStatus: RoomStatus | null = isSecretSupabaseKey

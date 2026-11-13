@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import type { CellPosition, CrosswordPuzzle, Letters } from "@/lib/crossword";
+import type { Authors, CellPosition, CrosswordPuzzle, Letters } from "@/lib/crossword";
 import { makePuzzle } from "@/test/fixtures";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CrosswordGrid } from "./CrosswordGrid";
@@ -26,10 +26,14 @@ const withClues = makePuzzle({
 
 function Harness({
   initial = {},
+  authors,
+  colours,
   onLetter,
   puzzle: shown = puzzle,
 }: {
   initial?: Letters;
+  authors?: Authors;
+  colours?: Map<string, number>;
   onLetter?: (cell: CellPosition, letter: string) => void;
   puzzle?: CrosswordPuzzle;
 }) {
@@ -39,6 +43,8 @@ function Harness({
     <CrosswordGrid
       puzzle={shown}
       letters={letters}
+      authors={authors}
+      colours={colours}
       selectedCell={selected}
       onSelect={setSelected}
       onLetter={(cell, letter) => {
@@ -50,6 +56,7 @@ function Harness({
 }
 
 const cell = (row: number, col: number) => screen.getByLabelText(`Rad ${row + 1}, ruta ${col + 1}`) as HTMLInputElement;
+const background = (input: HTMLElement) => input.className.match(/\bbg-\S+/)?.[0];
 
 describe("CrosswordGrid", () => {
   afterEach(cleanup);
@@ -150,6 +157,34 @@ describe("CrosswordGrid", () => {
     expect(document.activeElement).toBe(cell(0, 2));
     fireEvent.change(cell(0, 2), { target: { value: "b" } });
     expect(document.activeElement).toBe(cell(0, 2));
+  });
+
+  it("tints each letter by who typed it, the same colour for the same player", () => {
+    render(
+      <Harness
+        initial={{ "0-0": "A", "0-1": "B", "1-1": "C", "0-2": "D" }}
+        authors={{ "0-0": "Kim", "0-1": "Ann", "1-1": "Kim", "1-0": "Kim" }}
+        colours={new Map([["Kim", 0], ["Ann", 1]])}
+      />,
+    );
+    const kim = background(cell(0, 0));
+    expect(kim).toMatch(/^bg-\w+-300\/40$/);
+    expect(background(cell(1, 1))).toBe(kim);
+    expect(background(cell(0, 1))).toMatch(/^bg-\w+-300\/40$/);
+    expect(background(cell(0, 1))).not.toBe(kim);
+    // A letter without an author stays plain, and an author without a letter shows nothing.
+    expect(background(cell(0, 2))).toBe("bg-white/80");
+    expect(background(cell(1, 0))).toBe("bg-white/15");
+  });
+
+  it("keeps the player's tint in the selected word and outlines it instead", () => {
+    render(<Harness initial={{ "0-1": "B", "0-2": "C" }} authors={{ "0-1": "Kim" }} colours={new Map([["Kim", 0]])} />);
+    const kim = background(cell(0, 1));
+    act(() => cell(0, 0).focus());
+    expect(background(cell(0, 1))).toBe(kim);
+    expect(cell(0, 1).className).toMatch(/\bring-sky-400\b/);
+    // A letter nobody is credited for still shows the word's own highlight.
+    expect(background(cell(0, 2))).toBe("bg-sky-100/90");
   });
 
   it("replaces the letter when typing into a filled cell", () => {

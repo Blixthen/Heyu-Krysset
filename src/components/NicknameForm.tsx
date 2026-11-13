@@ -1,6 +1,6 @@
 "use client";
 
-import { MAX_NICKNAME_LENGTH } from "@/lib/chat";
+import { MAX_NICKNAME_LENGTH } from "@/lib/players";
 import { Sparkles } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { AuthCard, inputClassName, primaryButtonClassName } from "./AuthCard";
@@ -10,7 +10,8 @@ export function NicknameForm({ onJoin }: { onJoin: (nickname: string) => void })
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const next = draft.trim().slice(0, MAX_NICKNAME_LENGTH);
+    // Trimmed after cutting too, so a cut can't leave a trailing space that peers reject.
+    const next = draft.trim().slice(0, MAX_NICKNAME_LENGTH).trim();
     if (next) onJoin(next);
   }
 

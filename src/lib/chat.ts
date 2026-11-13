@@ -1,3 +1,5 @@
+import { MAX_NICKNAME_LENGTH } from "./players";
+
 export type ChatMessage = {
   id: string;
   /** Random per-tab id, used to tell our own messages apart from same-named peers. */
@@ -7,7 +9,6 @@ export type ChatMessage = {
   sentAt: string;
 };
 
-export const MAX_NICKNAME_LENGTH = 24;
 export const MAX_MESSAGE_LENGTH = 500;
 export const MAX_MESSAGES = 200;
 
