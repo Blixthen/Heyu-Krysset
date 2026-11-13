@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   adjacentCell,
   chooseDirection,
+  directionForTap,
   toggleDirection,
   dedupeCells,
   findNeighbor,
@@ -182,6 +183,27 @@ describe("words", () => {
   it("keeps the current direction where an across and a down word cross", () => {
     expect(chooseDirection(cells, at(0, 0), "down")).toBe("down");
     expect(chooseDirection(cells, at(0, 0), "across")).toBe("across");
+  });
+
+  it("on a tap, prefers the direction in which the cell starts a word", () => {
+    // In a full 3×3 grid, (0,1) is the middle of the across word on row 0 and the start of column 1.
+    const full = gridCells(3, 3);
+    const middle = full.find((c) => c.row === 0 && c.col === 1)!;
+    expect(directionForTap(full, middle, "across")).toBe("down");
+    // (0,2) ends "A B C" and starts the down word "C E G".
+    expect(directionForTap(cells, at(0, 2), "across")).toBe("down");
+    // (3,0) ends the down word in column 0 and starts "H I".
+    expect(directionForTap(cells, at(3, 0), "down")).toBe("across");
+  });
+
+  it("on a tap, keeps the current direction where the cell starts both words", () => {
+    expect(directionForTap(cells, at(0, 0), "down")).toBe("down");
+    expect(directionForTap(cells, at(0, 0), "across")).toBe("across");
+  });
+
+  it("on a tap, follows chooseDirection where the cell starts no word", () => {
+    expect(directionForTap(cells, at(0, 1), "down")).toBe("across");
+    expect(directionForTap(cells, at(1, 0), "across")).toBe("down");
   });
 
   it("keeps the current direction for a cell in no word", () => {

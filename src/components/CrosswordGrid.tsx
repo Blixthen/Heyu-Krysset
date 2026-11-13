@@ -3,6 +3,7 @@
 import {
   cellKey,
   chooseDirection,
+  directionForTap,
   findNeighbor,
   nextInWord,
   oneLetter,
@@ -51,6 +52,9 @@ export function CrosswordGrid({
   const directionRef = useRef<Direction>("across");
   // Whether the cell being tapped already had focus, so a tap can switch direction.
   const wasFocused = useRef(false);
+  // Set while typing or an arrow key moves focus, so that focus keeps going the
+  // same way instead of being read as a tap on the next cell.
+  const moving = useRef(false);
 
   function setDirection(next: Direction) {
     directionRef.current = next;
@@ -59,7 +63,9 @@ export function CrosswordGrid({
 
   function select(next: LetterCell) {
     onSelect({ row: next.row, col: next.col });
+    moving.current = true;
     focusCell(next);
+    moving.current = false;
     return next;
   }
 
@@ -138,7 +144,8 @@ export function CrosswordGrid({
                 wasFocused.current = false;
               }}
               onFocus={(event) => {
-                setDirection(chooseDirection(puzzle.cells, cell, directionRef.current));
+                const choose = moving.current ? chooseDirection : directionForTap;
+                setDirection(choose(puzzle.cells, cell, directionRef.current));
                 onSelect({ row: cell.row, col: cell.col });
                 const input = event.currentTarget;
                 input.select();
