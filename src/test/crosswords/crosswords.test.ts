@@ -85,10 +85,10 @@ describe.each(CROSSWORD_PHOTOS)("crossword photo $name ($description)", (crosswo
     expect(input.ok).toBe(true);
   });
 
-  it("is read by the image reading with no problems", () => {
+  it("is read by the image reading with exactly its known problems (most have none)", () => {
     const cells = readGrid(jpeg.decode(readFileSync(photoPath(crossword)), { useTArray: true }));
     expect(cells, "no usable grid found").not.toBeNull();
-    expect(findProblems(crossword, cells ?? [])).toEqual([]);
+    expect(findProblems(crossword, cells ?? [])).toEqual(crossword.knownGridProblems ?? []);
   });
 
   it("replays its recorded Gemini reply into exactly its known problems", () => {

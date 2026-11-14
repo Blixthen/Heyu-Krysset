@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySquares, findGrid, readGrid, toLetterCells, type Pixels } from "./gridImage";
+import { classifySquares, findGrid, readGrid, separateRegions, toLetterCells, type Pixels } from "./gridImage";
 
 /** A synthetic bildkorsord page: 8×8 squares of SIZE px with a MARGIN, lines LINE px wide. */
 const SIZE = 40;
@@ -153,15 +153,17 @@ function shift(pixels: Pixels, dx: number, dy: number): Pixels {
   return { width, height, data };
 }
 
+/**
+ * The kind of the square at each lattice square, found by position: squares
+ * are placed one by one along the printed lines, so their own indices can
+ * differ. "missing" where no square was placed, such as in a picture.
+ */
 function kinds(pixels: Pixels) {
   const grid = findGrid(pixels);
   if (!grid) throw new Error("no grid found");
-  const squares = classifySquares(pixels, grid);
-  return (row: number, col: number) => {
-    const square = squares.find((candidate) => candidate.row === row && candidate.col === col);
-    if (!square) return "missing";
-    return square.kind === "letter" ? (square.marked ? "marked" : "letter") : "other";
-  };
+  const at = kindAt(pixels);
+  const middle = (lines: number[], index: number) => (lines[index] + lines[index + 1]) / 2;
+  return (row: number, col: number) => at(middle(grid.columns.lines, col), middle(grid.rows.lines, row));
 }
 
 /** The kind of the square containing the pixel (x, y). */
@@ -169,10 +171,11 @@ function kindAt(pixels: Pixels) {
   const grid = findGrid(pixels);
   if (!grid) throw new Error("no grid found");
   const squares = classifySquares(pixels, grid);
-  const index = (lines: number[], at: number) => lines.findIndex((line, i) => line <= at && at < lines[i + 1]);
   return (x: number, y: number) => {
-    const square = squares.find((candidate) => candidate.row === index(grid.rows.lines, y) && candidate.col === index(grid.columns.lines, x));
-    return square?.kind ?? "missing";
+    const square = squares.find(({ box }) => box.left <= x && x < box.right && box.top <= y && y < box.bottom);
+    if (!square) return "missing";
+    if (square.kind !== "letter") return "other";
+    return square.marked ? "marked" : "letter";
   };
 }
 
@@ -192,6 +195,16 @@ describe("findGrid", () => {
     const page = new Page(20);
     picture(page, 3, 4);
     expect(findGrid(page.pixels())?.columns.step).toBeCloseTo(SIZE, 0);
+  });
+
+  it("finds squares as small as a two-page spread photographed from further away gives", () => {
+    // The grid's squares are 1/60 of the photo's width and height, past the 40 across a single page has.
+    const inner = new Page(20).pixels();
+    const side = SIZE * 60;
+    const data = new Uint8ClampedArray(side * side * 4).fill(WHITE);
+    for (let y = 0; y < inner.height; y += 1) data.set(inner.data.subarray(y * inner.width * 4, (y + 1) * inner.width * 4), y * side * 4);
+    const grid = findGrid({ width: side, height: side, data });
+    expect([grid?.columns.step, grid?.rows.step]).toEqual([expect.closeTo(SIZE, 0), expect.closeTo(SIZE, 0)]);
   });
 
   it("returns null for a page without a grid", () => {
@@ -221,7 +234,8 @@ describe("classifySquares", () => {
     expect(kind(6, 2)).toBe("other");
     expect(kind(1, 1)).toBe("other");
     expect(kind(1, 6)).toBe("letter");
-    expect(kind(4, 6)).toBe("other");
+    // A white area without grid lines gets no square at all.
+    expect(kind(4, 6)).toBe("missing");
   });
 
   it("reads tinted letter squares but not grey blocks, also under a warm colour cast", () => {
@@ -278,7 +292,7 @@ describe("classifySquares", () => {
       for (const row of [4, 5]) page.fill(x, MARGIN + row * SIZE + 5, 4, 2, 20);
     }
     for (let y = MARGIN + 3 * SIZE + 4; y < MARGIN + 6 * SIZE - 4; y += 6) page.fill(MARGIN + 6 * SIZE + 5, y, 2, 4, 20);
-    expect(kinds(page.pixels())(4, 6)).toBe("other");
+    expect(kinds(page.pixels())(4, 6)).toBe("missing");
   });
 
   it("does not take an unbroken but wandering line off the lattice for a border, as a picture's edge can be", () => {
@@ -290,7 +304,7 @@ describe("classifySquares", () => {
       for (const row of [4, 5]) page.fill(MARGIN + 5 * SIZE + 4 + step, MARGIN + row * SIZE + 5 + wobble, 1, 2, 20);
       page.fill(MARGIN + 6 * SIZE + 5 + wobble, MARGIN + 3 * SIZE + 4 + step, 2, 1, 20);
     }
-    expect(kinds(page.pixels())(4, 6)).toBe("other");
+    expect(kinds(page.pixels())(4, 6)).toBe("missing");
   });
 
   it("does not read an even, tinted area without all four borders as a letter square, as a wall in a picture is", () => {
@@ -361,8 +375,9 @@ describe("classifySquares", () => {
     // so the lattice adds a column there that the photo's edge seems to cut off.
     const page = shift(new Page(20).pixels(), -Math.round(SIZE * 0.8 - MARGIN), MARGIN + Math.round(SIZE * 0.25));
     const kind = kinds(page);
-    // Column 0 is the margin; the grid starts at column 1.
-    expect([kind(0, 0), kind(3, 0), kind(0, 1), kind(3, 1)]).toEqual(["other", "other", "letter", "letter"]);
+    // Column 0 is the margin; the grid starts at column 1. Its corner, cut off
+    // at the top and lined on two sides, is placed but isn't a letter square.
+    expect([kind(0, 0), kind(3, 0), kind(0, 1), kind(3, 1)]).toEqual(["other", "missing", "letter", "letter"]);
   });
 });
 
@@ -370,9 +385,27 @@ describe("toLetterCells", () => {
   it("gives letter squares in 0–1000 coordinates", () => {
     const pixels = new Page(20).paint(0, 1, text).pixels();
     const grid = findGrid(pixels)!;
-    const cells = toLetterCells(pixels, grid, classifySquares(pixels, grid));
+    const cells = toLetterCells(pixels, classifySquares(pixels, grid));
     expect(cells).toHaveLength(COUNT * COUNT - 1);
     expect(cells[0]).toEqual({ row: 0, col: 0, x: 56, y: 56, w: 111, h: 111 });
+  });
+});
+
+describe("separateRegions", () => {
+  const square = (row: number, col: number) => ({ row, col, box: { left: col, top: row, right: col + 1, bottom: row + 1 }, cut: { left: false, top: false, right: false, bottom: false } });
+  const region = (seed: { row: number; col: number }, squares: [number, number][]) => ({
+    seed,
+    squares: new Map(squares.map(([row, col]) => [`${row},${col}`, square(row, col)])),
+  });
+
+  it("numbers each region from its seed's lattice square, from 0", () => {
+    const placed = separateRegions([region({ row: 2, col: 3 }, [[0, 0], [0, 1], [-1, 0]])]);
+    expect(placed.map(({ row, col }) => [row, col])).toEqual([[1, 0], [1, 1], [0, 0]]);
+  });
+
+  it("moves a region whose numbers would collide with an earlier one's past its columns", () => {
+    const placed = separateRegions([region({ row: 0, col: 0 }, [[0, 0], [0, 1]]), region({ row: 0, col: 1 }, [[0, 0], [0, 1]])]);
+    expect(placed.map(({ row, col }) => `${row},${col}`)).toEqual(["0,0", "0,1", "0,2", "0,3"]);
   });
 });
 
@@ -381,6 +414,37 @@ describe("readGrid", () => {
     const cells = readGrid(new Page(20).paint(0, 1, text).paint(2, 2, grey).pixels());
     expect(cells).toHaveLength(COUNT * COUNT - 2);
     expect(cells?.[0]).toEqual({ row: 0, col: 0, x: 56, y: 56, w: 111, h: 111 });
+  });
+
+  it("reads both pages of a spread whose grids don't line up, which one straight lattice can't", () => {
+    // Everything right of column 4's left line moves down half a square, as the right page of a spread can.
+    const cells = readGrid(new Page(20).sag(MARGIN + 4 * SIZE + LINE + 1, SIZE / 2).pixels());
+    expect(cells).toHaveLength(COUNT * COUNT);
+    // Each row of the right page sits on its own lines, half a square below the left page's.
+    const tops = (right: boolean) => [...new Set(cells?.filter((cell) => cell.x > 480 === right).map((cell) => cell.y))].sort((a, b) => a - b);
+    const thousandths = (px: number) => (px * 1000) / (MARGIN * 2 + COUNT * SIZE);
+    // A square's edge may sit on either side of its line, LINE px wide.
+    for (const [row, top] of tops(true).entries()) {
+      expect(Math.abs(top - tops(false)[row] - thousandths(SIZE / 2)), `row ${row}`).toBeLessThanOrEqual(thousandths(2 * LINE));
+    }
+  });
+
+  it("places the squares beside a column the photo's left edge cut short on their own lines", () => {
+    // Column 0 keeps 70% of its width, so its box is narrower than the squares beside it.
+    const cells = readGrid(shift(new Page(20).pixels(), MARGIN + LINE + Math.round(SIZE * 0.3), 0)) ?? [];
+    const widths = cells.filter((cell) => cell.x > 0).map((cell) => cell.w);
+    expect(widths.length).toBeGreaterThan(40);
+    for (const width of widths) expect(width * (MARGIN + COUNT * SIZE + LINE - Math.round(SIZE * 0.3) - LINE) / 1000).toBeCloseTo(SIZE - LINE, -1);
+  });
+
+  it("keeps the squares of a row the photo's top edge cut off their size, despite a line near a side", () => {
+    // Row 0 keeps 70% of its height; square (0,3) has a line 7 px inside its right side, near enough to snap to.
+    const page = new Page(20).paint(0, 3, (p, left, top) => p.fill(left + SIZE - 7, top, LINE, SIZE, 20));
+    const cells = readGrid(shift(page.pixels(), 0, MARGIN + Math.round(SIZE * 0.3))) ?? [];
+    const top = cells.filter((cell) => cell.y === 0);
+    expect(top.length).toBe(COUNT);
+    const width = Math.round(((SIZE - LINE) * 1000) / (MARGIN * 2 + COUNT * SIZE));
+    for (const cell of top) expect(Math.abs(cell.w - width), `square at ${cell.x}`).toBeLessThanOrEqual(10);
   });
 
   it("returns null for a page without a grid", () => {
