@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { Authors, CellPosition, CrosswordPuzzle, Letters } from "@/lib/crossword";
 import { makePuzzle } from "@/test/fixtures";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CrosswordGrid } from "./CrosswordGrid";
@@ -72,6 +72,38 @@ describe("CrosswordGrid", () => {
     fireEvent.change(cell(0, 0), { target: { value: "ö" } });
     expect(cell(0, 0).value).toBe("Ö");
     expect(document.activeElement).toBe(cell(0, 1));
+  });
+
+  it("takes the typed letter over the old one when the caret sits beside it, as on phones", () => {
+    const onLetter = vi.fn();
+    render(<Harness initial={{ "0-0": "A" }} onLetter={onLetter} />);
+    cell(0, 0).focus();
+    fireEvent.change(cell(0, 0), { target: { value: "bA" } });
+    expect(onLetter).toHaveBeenLastCalledWith({ row: 0, col: 0 }, "B");
+    expect(cell(0, 0).value).toBe("B");
+    expect(document.activeElement).toBe(cell(0, 1));
+  });
+
+  it("shows the toolbar in the row with the zoom buttons, not over the photo", () => {
+    render(
+      <CrosswordGrid puzzle={puzzle} letters={{}} selectedCell={null} onSelect={() => {}} onLetter={() => {}} toolbar={<p>Spelarna</p>} />,
+    );
+    const view = within(screen.getByRole("group", { name: "Korsordet, zoomat" }));
+    expect(view.getByAltText("Korsordet")).toBeTruthy();
+    expect(view.getByLabelText("Rad 1, ruta 1")).toBeTruthy();
+    expect(screen.getByText("Spelarna")).toBeTruthy();
+    expect(view.queryByText("Spelarna")).toBeNull();
+    expect(view.queryByRole("button", { name: "Zooma in" })).toBeNull();
+  });
+
+  it("leaves a filled square as it was when something other than a letter is typed", () => {
+    const onLetter = vi.fn();
+    render(<Harness initial={{ "0-0": "A" }} onLetter={onLetter} />);
+    cell(0, 0).focus();
+    fireEvent.change(cell(0, 0), { target: { value: "A1" } });
+    expect(onLetter).not.toHaveBeenCalled();
+    expect(cell(0, 0).value).toBe("A");
+    expect(document.activeElement).toBe(cell(0, 0));
   });
 
   it("advances downward after an up/down arrow was used", () => {
@@ -193,12 +225,13 @@ describe("CrosswordGrid", () => {
     expect(cell(0, 0).value).toBe("B");
   });
 
-  it("does not advance on non-letters", () => {
+  it("neither sends nor advances on non-letters", () => {
     const onLetter = vi.fn();
     render(<Harness onLetter={onLetter} />);
     cell(0, 0).focus();
     fireEvent.change(cell(0, 0), { target: { value: "1" } });
-    expect(onLetter).toHaveBeenCalledWith({ row: 0, col: 0 }, "");
+    expect(onLetter).not.toHaveBeenCalled();
+    expect(cell(0, 0).value).toBe("");
     expect(document.activeElement).toBe(cell(0, 0));
   });
 

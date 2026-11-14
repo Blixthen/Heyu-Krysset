@@ -6,8 +6,8 @@ import {
   directionForTap,
   findNeighbor,
   nextInWord,
-  oneLetter,
   toggleDirection,
+  typedLetter,
   wordCells,
   type Authors,
   type CellPosition,
@@ -17,7 +17,7 @@ import {
   type Letters,
 } from "@/lib/crossword";
 import { photoUrl } from "@/lib/photo";
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PLAYER_COLOURS } from "./PlayerLegend";
 import { cellPlacement, ZoomablePhoto } from "./ZoomablePhoto";
 
@@ -47,6 +47,7 @@ export function CrosswordGrid({
   selectedCell,
   onSelect,
   onLetter,
+  toolbar,
 }: {
   puzzle: CrosswordPuzzle;
   letters: Letters;
@@ -56,6 +57,8 @@ export function CrosswordGrid({
   selectedCell: CellPosition | null;
   onSelect: (cell: CellPosition) => void;
   onLetter: (cell: CellPosition, letter: string) => void;
+  /** Shown beside the zoom buttons, above the photo. */
+  toolbar?: ReactNode;
 }) {
   // Which way typing advances. Selecting a cell picks the way its word runs;
   // arrow keys and tapping the selected cell again change it. The ref holds the
@@ -125,7 +128,7 @@ export function CrosswordGrid({
   }
 
   return (
-    <ZoomablePhoto image={puzzle.image}>
+    <ZoomablePhoto image={puzzle.image} toolbar={toolbar}>
       {/* The sharp stored copy covers the inline one once it loads, and stays hidden if it can't. */}
       {puzzle.photo && failedPhoto !== puzzle.photo ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -177,7 +180,9 @@ export function CrosswordGrid({
             }}
             onChange={(event) => {
               // No maxLength: typing into a filled cell replaces its letter.
-              const next = oneLetter(event.target.value);
+              const next = typedLetter(letter, event.target.value);
+              // The square stays as it was; as a controlled input, the stray character is dropped.
+              if (next === null) return;
               onLetter({ row: cell.row, col: cell.col }, next);
               if (next) forward(cell);
             }}

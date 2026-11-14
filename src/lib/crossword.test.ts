@@ -14,6 +14,7 @@ import {
   isLetterCell,
   lettersFromPayload,
   oneLetter,
+  typedLetter,
   toCrosswordPuzzle,
   wordCells,
   type LetterCell,
@@ -60,6 +61,38 @@ describe("oneLetter", () => {
   it("returns an empty string when there is no letter", () => {
     expect(oneLetter("12 ?")).toBe("");
     expect(oneLetter("")).toBe("");
+  });
+});
+
+describe("typedLetter", () => {
+  it("takes the new letter whichever side of the old one the caret was", () => {
+    expect(typedLetter("A", "bA")).toBe("B");
+    expect(typedLetter("A", "Ab")).toBe("B");
+    expect(typedLetter("Ö", "Öå")).toBe("Å");
+  });
+
+  it("takes a letter that replaced the selected one, or one typed in an empty square", () => {
+    expect(typedLetter("A", "b")).toBe("B");
+    expect(typedLetter("", "c")).toBe("C");
+  });
+
+  it("keeps the letter when the same one is typed again", () => {
+    expect(typedLetter("A", "aA")).toBe("A");
+  });
+
+  it("keeps the letter when it replaced a selected copy of itself", () => {
+    expect(typedLetter("A", "a")).toBe("A");
+  });
+
+  it("is empty when the letter is deleted", () => {
+    expect(typedLetter("A", "")).toBe("");
+  });
+
+  it("is null when no letter was typed, whatever the square held", () => {
+    expect(typedLetter("A", "A1")).toBeNull();
+    expect(typedLetter("A", " A")).toBeNull();
+    expect(typedLetter("", "1")).toBeNull();
+    expect(typedLetter("A", "?")).toBeNull();
   });
 });
 

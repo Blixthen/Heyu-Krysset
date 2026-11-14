@@ -91,12 +91,30 @@ export function dedupeCells(cells: LetterCell[]) {
 }
 
 /** Returns the last letter in the input, upper-cased, or "" if there is none. */
+/** The letters in a value, upper-cased with Swedish rules; anything else is dropped. */
+function lettersIn(value: string) {
+  return [...value.toLocaleUpperCase("sv-SE")].filter((char) => /^\p{L}$/u.test(char));
+}
+
 export function oneLetter(value: string) {
-  const chars = [...value.toLocaleUpperCase("sv-SE")];
-  for (let index = chars.length - 1; index >= 0; index -= 1) {
-    if (/^\p{L}$/u.test(chars[index])) return chars[index];
-  }
-  return "";
+  return lettersIn(value).at(-1) ?? "";
+}
+
+/**
+ * The letter typed into a square that held `previous`, from the input's new
+ * value: "" when it was cleared, null when no letter was typed (a digit or
+ * a space). Phones often put the caret beside the old letter instead of
+ * selecting it, so the value can be "BA" or "AB"; the old letter is taken
+ * out once, so the new one wins whichever side it lands on, and typing the
+ * same letter again keeps it.
+ */
+export function typedLetter(previous: string, value: string): string | null {
+  const letters = lettersIn(value);
+  const old = previous ? letters.indexOf(previous) : -1;
+  const added = letters.filter((_, index) => index !== old);
+  // A lone old letter left beside something that isn't one means nothing new was typed.
+  if (added.length === 0 && letters.length < [...value].length) return null;
+  return (added.length > 0 ? added : letters).at(-1) ?? "";
 }
 
 const IMAGE_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
