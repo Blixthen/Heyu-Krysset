@@ -20,6 +20,16 @@ const STATUS_DOTS: Record<RoomStatus, string> = {
   unconfigured: "bg-amber-300",
 };
 
+/** Whether letters and messages reach the others. */
+export function StatusBadge({ status }: { status: RoomStatus }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-slate-950 px-2.5 py-1 text-xs text-slate-300">
+      <span className={`size-2 rounded-full ${STATUS_DOTS[status]}`} />
+      {STATUS_LABELS[status]}
+    </span>
+  );
+}
+
 export function ChatPanel({
   clientId,
   status,
@@ -96,10 +106,7 @@ export function ChatPanel({
         ) : (
           <h2 className="text-sm font-semibold text-slate-50">Livechatt</h2>
         )}
-        <span className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-2.5 py-1 text-xs text-slate-300">
-          <span className={`size-2 rounded-full ${STATUS_DOTS[status]}`} />
-          {STATUS_LABELS[status]}
-        </span>
+        <StatusBadge status={status} />
       </div>
       <div className={`${open ? "flex" : "hidden"} min-h-0 flex-1 flex-col lg:flex`} id="chat-body">
         {connectionError && status !== "live" ? (

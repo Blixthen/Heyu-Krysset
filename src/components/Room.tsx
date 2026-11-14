@@ -6,9 +6,9 @@ import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
 import { playerColours } from "@/lib/players";
 import { restartedPuzzle } from "@/lib/storedPuzzle";
-import { Grid3x3, RotateCcw } from "lucide-react";
+import { Grid3x3, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { ChatPanel } from "./ChatPanel";
+import { ChatPanel, StatusBadge } from "./ChatPanel";
 import { CellEditor } from "./CellEditor";
 import { CrosswordGrid, focusCell } from "./CrosswordGrid";
 import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
@@ -41,7 +41,22 @@ export function Room({
   // on wide screens it is always shown beside the grid.
   const [chatOpen, setChatOpen] = useState(false);
   const [lastSeenId, setLastSeenId] = useState<string | null>(null);
-  const unread = chatOpen ? 0 : countUnread(room.messages, lastSeenId, room.clientId);
+  // Only the crossword and the notices about it, so a phone shows more of it.
+  // The header and chat are hidden rather than unmounted, so a half-written
+  // message survives.
+  const [gridOnly, setGridOnly] = useState(false);
+  const showGridOnly = gridOnly && Boolean(puzzle) && !draft;
+  /** The display a part has, or hidden while only the crossword shows. */
+  const shownBesideGrid = (display: string) => (showGridOnly ? "hidden" : display);
+  // An open chat is out of sight too while only the crossword shows.
+  const unread = chatOpen && !showGridOnly ? 0 : countUnread(room.messages, lastSeenId, room.clientId);
+  const unreadLabel = unread > 99 ? "99+" : String(unread);
+
+  function startDraft(next: Draft) {
+    // Checking the squares needs the whole view, and sharing them shouldn't hide it again.
+    setGridOnly(false);
+    setDraft(next);
+  }
 
   function toggleChat() {
     if (chatOpen) setLastSeenId(room.messages.at(-1)?.id ?? null);
@@ -90,7 +105,7 @@ export function Room({
   return (
     <main className="flex h-dvh max-h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
       {/* Phones have no room beside the title and buttons, so the photo gets its own row above them. */}
-      <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-5">
+      <header className={`${shownBesideGrid("grid")} shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-5`}>
         {/* Decoration only. The still frame stands in when the user asks for less motion. */}
         <picture className="col-span-2 justify-self-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
           <source media="(prefers-reduced-motion: reduce)" srcSet="/banner-still.webp" />
@@ -125,7 +140,7 @@ export function Room({
               <span className="hidden sm:inline">Börja om</span>
             </button>
           ) : null}
-          {puzzle || draft ? <PuzzleUploader compact onRead={setDraft} /> : null}
+          {puzzle || draft ? <PuzzleUploader compact onRead={startDraft} /> : null}
           <button
             type="button"
             onClick={onLeave}
@@ -160,8 +175,10 @@ export function Room({
 
       <div
         className={`grid min-h-0 flex-1 ${
-          chatOpen ? "grid-rows-[minmax(0,1fr)_minmax(9.5rem,36dvh)]" : "grid-rows-[minmax(0,1fr)_auto]"
-        } lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-1`}
+          showGridOnly
+            ? "grid-rows-1"
+            : `${chatOpen ? "grid-rows-[minmax(0,1fr)_minmax(9.5rem,36dvh)]" : "grid-rows-[minmax(0,1fr)_auto]"} lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-1`
+        }`}
       >
         <section className="flex min-h-0 items-stretch justify-center overflow-hidden p-2 sm:p-4">
           {draft ? (
@@ -177,28 +194,61 @@ export function Room({
                 selectedCell={selectedCell}
                 onSelect={setSelectedCell}
                 onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
-                toolbar={<PlayerLegend colours={colours} />}
+                toolbar={
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <PlayerLegend colours={colours} />
+                    </div>
+                    {/* The chat that shows these is hidden, and typing without a connection reaches no one. */}
+                    {showGridOnly && room.status !== "live" ? (
+                      <>
+                        <StatusBadge status={room.status} />
+                        {room.status === "error" ? (
+                          <button type="button" onClick={room.reconnect} className="shrink-0 text-xs font-semibold text-amber-300 underline">
+                            Försök igen
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setGridOnly(!showGridOnly)}
+                      aria-label={
+                        showGridOnly ? (unread > 0 ? `Visa allt, ${unreadLabel} nya meddelanden` : "Visa allt") : "Visa bara korsordet"
+                      }
+                      className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-slate-100 hover:bg-slate-800"
+                    >
+                      {showGridOnly ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                      <span className="hidden sm:inline">{showGridOnly ? "Visa allt" : "Bara korsordet"}</span>
+                      {showGridOnly && unread > 0 ? (
+                        <span className="rounded-full bg-sky-400 px-1.5 text-xs font-bold text-slate-950">{unreadLabel}</span>
+                      ) : null}
+                    </button>
+                  </div>
+                }
               />
             </div>
           ) : (
-            <PuzzleUploader onRead={setDraft} />
+            <PuzzleUploader onRead={startDraft} />
           )}
         </section>
 
-        <ChatPanel
-          clientId={room.clientId}
-          status={room.status}
-          connectionError={room.connectionError}
-          sendError={room.sendError}
-          messages={room.messages}
-          reactions={room.reactions}
-          onSend={(text) => void room.sendMessage(text)}
-          onReact={(messageId, emoji) => void room.react(messageId, emoji)}
-          onReconnect={room.reconnect}
-          open={chatOpen}
-          unread={unread}
-          onToggle={toggleChat}
-        />
+        <div className={shownBesideGrid("contents")}>
+          <ChatPanel
+            clientId={room.clientId}
+            status={room.status}
+            connectionError={room.connectionError}
+            sendError={room.sendError}
+            messages={room.messages}
+            reactions={room.reactions}
+            onSend={(text) => void room.sendMessage(text)}
+            onReact={(messageId, emoji) => void room.react(messageId, emoji)}
+            onReconnect={room.reconnect}
+            open={chatOpen}
+            unread={unread}
+            onToggle={toggleChat}
+          />
+        </div>
       </div>
     </main>
   );
