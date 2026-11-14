@@ -35,6 +35,11 @@ export type CrosswordPhoto = {
    * The live eval reports these instead of failing, since readings vary.
    */
   knownProblems?: string[];
+  /**
+   * The same for the image reading (readGrid), which must read most photos
+   * with no problems; for one it can't read fully yet, what it misses.
+   */
+  knownGridProblems?: string[];
 };
 
 export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
@@ -109,7 +114,7 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     name: "nallar",
     description: "teddy bears, bottom rows cut off",
     minCells: 100,
-    letterPoints: [[549, 149], [251, 954], [123, 551], [336, 666], [890, 91], [719, 781], [505, 263], [206, 493], [37, 838]],
+    letterPoints: [[549, 149], [251, 954], [123, 551], [336, 666], [890, 91], [719, 781], [505, 263], [206, 493], [37, 838], [37, 608]],
     cluePoints: [[250, 250], [506, 143], [633, 668], [377, 896], [846, 611], [974, 379]],
     knownProblems: [
       "letter square at (505, 263) not found",
@@ -124,13 +129,14 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     description: "tired office worker, yellow row",
     minCells: 130,
     letterPoints: [[144, 406], [196, 451], [357, 634], [837, 132], [464, 771], [784, 954], [90, 588], [37, 497], [624, 87]],
-    cluePoints: [[214, 179], [91, 361], [37, 679], [677, 587], [944, 41], [570, 86]],
+    cluePoints: [[214, 179], [91, 361], [37, 679], [677, 587], [944, 41], [570, 86], [144, 360]],
     knownProblems: [
       "letter square at (464, 771) not found",
       "clue area at (91, 361) read as letter square (6,1)",
       "clue area at (37, 679) read as letter square (13,0)",
       "clue area at (677, 587) read as letter square (11,9)",
       "clue area at (570, 86) read as letter square (0,0)",
+      "clue area at (144, 360) read as letter square (6,2)",
     ],
   },
   {
@@ -188,7 +194,8 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
     // Spread over the squares the back page shows through (lower left, right edge), the teal squares 1–5 and the yellow row.
     letterPoints: [
       [92.5, 778], [147, 840], [92.5, 961], [912.5, 108], [857.5, 164], [689, 227], [857.5, 409], [92.5, 593], [580, 654],
-      [362.5, 836], [912.5, 900], [634, 961], [912.5, 283], [525, 346], [312.5, 470], [967.5, 593], [802, 840],
+      [362.5, 836], [912.5, 900], [634, 961], [912.5, 283], [525, 346], [312.5, 470], [967.5, 593], [802, 840], [471, 593],
+      [800, 37],
     ],
     // The second clue point is a plain patch of wall in the photo, tinted like a solution square.
     cluePoints: [[197, 409], [145.6, 49], [35.6, 513], [472, 532], [857.5, 846], [187.5, 186], [884, 967], [689, 409], [525, 714], [967.5, 45], [34, 963]],
@@ -198,7 +205,44 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
       "letter square at (857.5, 409) not found",
       "letter square at (580, 654) not found",
       "letter square at (362.5, 836) not found",
+      "letter square at (471, 593) not found",
+      "letter square at (800, 37) not found",
       "clue area at (857.5, 846) read as letter square (10,11)",
+    ],
+  },
+  {
+    name: "dubbelkryss",
+    description: "two-page spread scaled down to 1200 px, about 41 squares across, with a curved right page",
+    minCells: 100,
+    // Both pages, including the yellow solution rows and the columns beside the spine.
+    letterPoints: [
+      [420, 627], [294, 664], [66, 768], [89, 833], [135, 867], [758, 220], [800, 312], [885, 371], [540, 634], [592, 823],
+      [469, 702], [518, 774], [518, 811],
+    ],
+    // Clue squares on both pages, also beside the spine, which a lattice two squares wide covers, and both pictures.
+    cluePoints: [
+      [246, 597], [318, 691], [266, 725], [34, 763], [66, 832], [783, 181], [690, 338], [885, 440], [595, 536], [615, 608],
+      [564, 854], [120, 300], [850, 650], [469, 639], [541, 772],
+    ],
+    // The column beside the spine curves away, so its squares look narrower than their neighbours.
+    knownGridProblems: ["letter square at (518, 774) not found", "letter square at (518, 811) not found"],
+    // Gemini's recorded reply finds only part of the grid; the image reading is the one that reads this photo.
+    knownProblems: [
+      "found 55 letter squares, expected at least 100",
+      "letter square at (420, 627) not found",
+      "letter square at (294, 664) not found",
+      "letter square at (66, 768) not found",
+      "letter square at (89, 833) not found",
+      "letter square at (135, 867) not found",
+      "letter square at (758, 220) not found",
+      "letter square at (800, 312) not found",
+      "letter square at (885, 371) not found",
+      "letter square at (540, 634) not found",
+      "letter square at (592, 823) not found",
+      "letter square at (469, 702) not found",
+      "letter square at (518, 774) not found",
+      "letter square at (518, 811) not found",
+      "clue area at (783, 181) read as letter square (12,11)",
     ],
   },
 ];

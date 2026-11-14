@@ -3,9 +3,11 @@ import { dedupeCells, isLetterCell, MAX_CELLS, MIN_CELLS, type LetterCell } from
 /**
  * Finds a bildkorsord's grid in the photo's pixels with classic image
  * processing: grid lines are long straight dark runs on a regular lattice,
- * which text, arrows and pictures are not. Pure (plain pixel arrays in,
- * plain data out), so it runs the same in the browser (canvas ImageData)
- * and in tests (decoded JPEGs).
+ * which text, arrows and pictures are not. The lattice gives the square size
+ * and where to start; each square is then placed on its own printed lines
+ * (placeSquares), since a photographed page is seldom flat. Pure (plain pixel
+ * arrays in, plain data out), so it runs the same in the browser (canvas
+ * ImageData) and in tests (decoded JPEGs).
  */
 
 /** RGBA pixels, row by row, as canvas ImageData and jpeg-js return them. */
@@ -22,9 +24,14 @@ export type Lattice = { step: number; lines: number[]; cut: { first: boolean; la
 export type Grid = { columns: Lattice; rows: Lattice };
 
 export type SquareKind = "letter" | "other";
+/** A square's edges in px, each on its own printed line where one was found. */
+export type Box = { left: number; top: number; right: number; bottom: number };
+/** A square placed on the photo, with which of its sides the photo's edge cut off. */
+export type PlacedSquare = { row: number; col: number; box: Box; cut: Record<keyof Box, boolean> };
 export type Square = {
   row: number;
   col: number;
+  box: Box;
   kind: SquareKind;
   /**
    * A letter square with a small mark in it (a start arrow), read from a blank
@@ -136,6 +143,15 @@ const MIN_BORDER_COVER = 0.6;
 /** Rows and columns may have steps that differ by this factor; printed squares are close to square. */
 const MAX_ASPECT = 1.3;
 /**
+ * When they differ more, the axis with the larger step was fitted to every
+ * other grid line if printed lines sit midway between its lines in at least
+ * this share of its squares. A curved page or two pages side by side scatter
+ * the lines, and a lattice twice the size, whose tolerance is twice as wide,
+ * catches more of them. Short dividers inside split clue squares, which make
+ * the other axis fit half a square, leave no such lines.
+ */
+const MIN_MIDWAY_SHARE = 0.4;
+/**
  * A start arrow sits in a corner or along an edge of a letter square, while
  * clue text fills the middle. Inside this inset (the centre third) a marked
  * letter square is as blank as an empty one…
@@ -171,6 +187,36 @@ const MIN_STRIP_LINE_COVER = 0.9;
 const STRIP_LINE_REACH = 2;
 /** A square cut off by the photo's edge is still read when at least this share of it is in the photo. */
 const MIN_EDGE_SHARE = 0.6;
+/**
+ * Squares are placed one at a time from a neighbour already placed, which
+ * follows the page where one straight lattice can't: perspective makes the
+ * squares near the camera bigger, a page curves towards the spine, and the
+ * two pages of a spread don't line up. A new square's side across from the
+ * shared one is looked for this share of its size either way…
+ */
+const SNAP_FAR_SHARE = 0.2;
+/** …and the two sides continuing the neighbour's this share, since a grid line bends little over one square. */
+const SNAP_ALONG_SHARE = 0.12;
+/**
+ * A snapped square's size stays within this factor of its neighbour's
+ * (perspective changes it only a little from one square to the next)…
+ */
+const MAX_SIZE_CHANGE = 1.1;
+/** …and of the lattice's step, so sizes can't wander off over many squares; otherwise its far side is on a clue's divider. */
+const MAX_SIZE_FROM_STEP = 1.25;
+/** Placed squares share only their borders; a box overlapping one by more than this share is the same square. */
+const MAX_SQUARE_OVERLAP = 0.25;
+/** How far (px) across a line to look for its pixels when snapping to it; a line drifts little over one square. */
+const SNAP_LINE_REACH = 1;
+/**
+ * The most squares across the photo's width (or down its height) the
+ * lattice search allows for. A two-page spread runs to about 45 squares
+ * across, and a lattice can't be fitted below its true step, only to a
+ * multiple of it: too low a limit reads every square as two by two.
+ */
+const MAX_SQUARES_ACROSS = 80;
+/** The fewest: a single square filling a sixth of the photo. */
+const MIN_SQUARES_ACROSS = 6;
 /**
  * The paper is the brightest large area, so its white is the brightness only
  * this share of the photo is darker than, even with a dark table or pictures around the page.
@@ -254,6 +300,19 @@ function onLine(lum: Float32Array, width: number, x: number, y: number, vertical
   return here < INK || (before - here >= LINE_CONTRAST && after - here >= LINE_CONTRAST);
 }
 
+/**
+ * A thin line only: darker than the paper on both sides of it. Placing
+ * squares uses this, since in a dark picture every pixel is as dark as ink.
+ */
+function onThinLine(lum: Float32Array, width: number, x: number, y: number, vertical: boolean, length: number) {
+  const along = vertical ? x : y;
+  if (along < LINE_REACH || along >= length - LINE_REACH) return false;
+  const here = lum[y * width + x];
+  const before = vertical ? lum[y * width + x - LINE_REACH] : lum[(y - LINE_REACH) * width + x];
+  const after = vertical ? lum[y * width + x + LINE_REACH] : lum[(y + LINE_REACH) * width + x];
+  return before - here >= LINE_CONTRAST && after - here >= LINE_CONTRAST;
+}
+
 /** Thin local maxima above MIN_LINE_SHARE of the strongest, merging thick lines. */
 function peaks(profile: Float32Array, share = MIN_LINE_SHARE): { at: number; weight: number }[] {
   let max = 0;
@@ -297,7 +356,7 @@ function explain(lines: { at: number; weight: number }[], step: number, start: n
 function fitLattice(
   { strong: lines, weak }: { strong: { at: number; weight: number }[]; weak: { at: number; weight: number }[] },
   length: number,
-  range: [number, number] = [length / 40, length / 6],
+  range: [number, number] = [length / MAX_SQUARES_ACROSS, length / MIN_SQUARES_ACROSS],
 ): Lattice | null {
   if (lines.length < 3) return null;
   let chosen = { step: 0, start: 0, score: 0, first: 0, last: 0 };
@@ -375,14 +434,39 @@ export function findGrid(pixels: Pixels, lum = luminance(pixels)): Grid | null {
   let columns = fitLattice(columnLines, pixels.width);
   let rows = fitLattice(rowLines, pixels.height);
   if (!columns || !rows) return null;
-  // Short dividers inside split clue squares can make one axis fit half a
-  // square. Squares are close to square, so refit that axis near the other's step.
+  // Squares are close to square, so when the steps disagree, one axis is
+  // refitted near the other's step: the one fitted to every other line, if
+  // either was (MIN_MIDWAY_SHARE), and otherwise the one with the smaller step.
+  const near = (step: number): [number, number] => [step / MAX_ASPECT, step * MAX_ASPECT];
   if (columns.step * MAX_ASPECT < rows.step) {
-    columns = fitLattice(columnLines, pixels.width, [rows.step / MAX_ASPECT, rows.step * MAX_ASPECT]) ?? columns;
+    if (midwayShare(rowLines.strong, rows, columns.step) >= MIN_MIDWAY_SHARE) {
+      rows = fitLattice(rowLines, pixels.height, near(columns.step)) ?? rows;
+    } else {
+      columns = fitLattice(columnLines, pixels.width, near(rows.step)) ?? columns;
+    }
   } else if (rows.step * MAX_ASPECT < columns.step) {
-    rows = fitLattice(rowLines, pixels.height, [columns.step / MAX_ASPECT, columns.step * MAX_ASPECT]) ?? rows;
+    if (midwayShare(columnLines.strong, columns, rows.step) >= MIN_MIDWAY_SHARE) {
+      columns = fitLattice(columnLines, pixels.width, near(rows.step)) ?? columns;
+    } else {
+      rows = fitLattice(rowLines, pixels.height, near(columns.step)) ?? rows;
+    }
   }
   return { columns, rows };
+}
+
+/**
+ * The share of a lattice's squares with a detected line across their middle,
+ * matched within the tolerance of the other axis's (finer) step.
+ */
+function midwayShare(lines: { at: number }[], lattice: Lattice, finerStep: number) {
+  const squares = lattice.lines.length - 1;
+  if (squares < 1) return 0;
+  let split = 0;
+  for (let index = 0; index < squares; index += 1) {
+    const middle = (lattice.lines[index] + lattice.lines[index + 1]) / 2;
+    if (lines.some((line) => Math.abs(line.at - middle) <= LINE_TOLERANCE * finerStep)) split += 1;
+  }
+  return split / squares;
 }
 
 /** Thin lines found in any strip, merged across strips (keeping the strongest of lines within 3 px). */
@@ -428,8 +512,17 @@ function borderCover(lum: Float32Array, pixels: Pixels, at: number, from: number
   return best;
 }
 
-/** Share of samples along a side that have a line pixel within `reach` px of `at`. */
-function lineCover(lum: Float32Array, pixels: Pixels, at: number, from: number, to: number, vertical: boolean, reach: number) {
+/** Share of samples along a side that have a line pixel (by `isLine`) within `reach` px of `at`. */
+function lineCover(
+  lum: Float32Array,
+  pixels: Pixels,
+  at: number,
+  from: number,
+  to: number,
+  vertical: boolean,
+  reach: number,
+  isLine: typeof onLine = onLine,
+) {
   const { width, height } = pixels;
   const length = vertical ? width : height;
   let samples = 0;
@@ -440,7 +533,7 @@ function lineCover(lum: Float32Array, pixels: Pixels, at: number, from: number, 
       const x = Math.round(vertical ? at + d : t);
       const y = Math.round(vertical ? t : at + d);
       if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      if (onLine(lum, width, x, y, vertical, length)) {
+      if (isLine(lum, width, x, y, vertical, length)) {
         hits += 1;
         break;
       }
@@ -450,7 +543,7 @@ function lineCover(lum: Float32Array, pixels: Pixels, at: number, from: number, 
 }
 
 /** Whether a printed line crosses the square's middle band, as in a split clue square. */
-function divided(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }) {
+function divided(lum: Float32Array, pixels: Pixels, box: Box) {
   const width = box.right - box.left;
   const height = box.bottom - box.top;
   for (let y = box.top + DIVIDER_BAND * height; y <= box.bottom - DIVIDER_BAND * height; y += 2) {
@@ -466,7 +559,7 @@ function divided(lum: Float32Array, pixels: Pixels, box: { left: number; top: nu
  * The part of the square past a clue strip along its top or bottom edge, or
  * null if there is no such strip.
  */
-function pastStrip(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }) {
+function pastStrip(lum: Float32Array, pixels: Pixels, box: Box) {
   const height = box.bottom - box.top;
   for (let offset = Math.round(STRIP_MIN * height); offset <= STRIP_MAX * height; offset += 1) {
     const top = box.top + offset;
@@ -500,7 +593,7 @@ function stripLineCover(lum: Float32Array, pixels: Pixels, y: number, left: numb
  * Whether all ink just inside the square's borders lies in one corner, within
  * CORNER_MARK of its side from that corner, as a solution square's number does.
  */
-function cornerMarkOnly(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }) {
+function cornerMarkOnly(lum: Float32Array, pixels: Pixels, box: Box) {
   const width = box.right - box.left;
   const height = box.bottom - box.top;
   const inner = { left: box.left + EDGE_INSET * width, top: box.top + EDGE_INSET * height, right: box.right - EDGE_INSET * width, bottom: box.bottom - EDGE_INSET * height };
@@ -526,7 +619,7 @@ function cornerMarkOnly(lum: Float32Array, pixels: Pixels, box: { left: number; 
 function borderedSides(
   lum: Float32Array,
   pixels: Pixels,
-  box: { left: number; top: number; right: number; bottom: number },
+  box: Box,
   cut: { left: boolean; top: boolean; right: boolean; bottom: boolean },
 ) {
   const { left, top, right, bottom } = box;
@@ -553,7 +646,7 @@ function chromaticity([r, g, b]: Colour): Colour {
 }
 
 /** Ink share, mean brightness and evenness inside a square, inset by `inset` of its size on each side. */
-function measure(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }, inset: number): Measure | null {
+function measure(lum: Float32Array, pixels: Pixels, box: Box, inset: number): Measure | null {
   const dx = inset * (box.right - box.left);
   const dy = inset * (box.bottom - box.top);
   const x0 = Math.max(0, Math.round(box.left + dx));
@@ -579,7 +672,7 @@ function measure(lum: Float32Array, pixels: Pixels, box: { left: number; top: nu
 }
 
 /** Mean chromaticity inside a square, inset by `inset` of its size on each side. */
-function hue(pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }, inset: number): Colour {
+function hue(pixels: Pixels, box: Box, inset: number): Colour {
   const dx = inset * (box.right - box.left);
   const dy = inset * (box.bottom - box.top);
   const rgb: Colour = [0, 0, 0];
@@ -603,6 +696,245 @@ function hueDistance(a: Colour, b: Colour) {
   return Math.max(...a.map((value, channel) => Math.abs(value - b[channel])));
 }
 
+/**
+ * The position nearest `at`, within `reach` px, where a printed line covers
+ * the span from `from` to `to`, or null if there is none. The prediction
+ * comes from the neighbouring square's own side, so the nearest line is that
+ * side's continuation; a clue's divider or the next line is further off. As
+ * for a square's borders, a line within BORDER_REACH of where it is expected
+ * may be broken (MIN_BORDER_COVER), one further off must be unbroken
+ * (MIN_SHIFTED_COVER): text and a picture's texture leave gaps.
+ */
+function snapLine(lum: Float32Array, pixels: Pixels, at: number, from: number, to: number, vertical: boolean, reach: number, inward: 1 | -1) {
+  // A thin line, or the inner edge of a thick border or picture frame: ink with the square's paper just inside it.
+  const isSide: typeof onLine = (values, width, x, y, isVertical, length) => {
+    if (onThinLine(values, width, x, y, isVertical, length)) return true;
+    const along = isVertical ? x : y;
+    // As in onLine: a line this close to the photo's edge can't be told from the edge.
+    if (along < LINE_REACH || along >= length - LINE_REACH) return false;
+    const inside = along + inward * LINE_REACH;
+    const here = values[y * width + x];
+    return here < INK && (isVertical ? values[y * width + inside] : values[inside * width + x]) - here >= LINE_CONTRAST;
+  };
+  for (let distance = 0; distance <= reach; distance += 1) {
+    // Sampled SNAP_LINE_REACH either side, so the broken-line zone ends that much sooner.
+    const needed = distance + SNAP_LINE_REACH <= BORDER_REACH ? MIN_BORDER_COVER : MIN_SHIFTED_COVER;
+    let best: { at: number; cover: number } | null = null;
+    for (const offset of distance === 0 ? [0] : [-distance, distance]) {
+      const cover = lineCover(lum, pixels, at + offset, from, to, vertical, SNAP_LINE_REACH, isSide);
+      if (cover >= needed && (!best || cover > best.cover)) best = { at: at + offset, cover };
+    }
+    if (best) return best.at;
+  }
+  return null;
+}
+
+type Side = keyof Box;
+const OPPOSITE: Record<Side, Side> = { left: "right", right: "left", top: "bottom", bottom: "top" };
+const STEPS: { side: Side; row: number; col: number }[] = [
+  { side: "right", row: 0, col: 1 },
+  { side: "left", row: 0, col: -1 },
+  { side: "bottom", row: 1, col: 0 },
+  { side: "top", row: -1, col: 0 },
+];
+
+type Placing = PlacedSquare & { found: Record<Side, boolean> };
+
+/**
+ * Snaps the given sides of a box to the printed lines near them, clipping it
+ * to the photo. Returns the box, which sides are on a line, and which the
+ * photo's edge cut off, or null if too little of it is in the photo.
+ */
+function snapBox(lum: Float32Array, pixels: Pixels, predicted: Box, reaches: Partial<Record<Side, number>>, found: Partial<Record<Side, boolean>>) {
+  const box = { ...predicted };
+  const isFound: Record<Side, boolean> = { left: false, top: false, right: false, bottom: false, ...found };
+  // Horizontal sides first, measured along the predicted width, then the vertical ones between them.
+  for (const side of ["top", "bottom", "left", "right"] as const) {
+    const reach = reaches[side];
+    if (reach === undefined) continue;
+    const vertical = side === "left" || side === "right";
+    const inward = side === "left" || side === "top" ? 1 : -1;
+    const at = vertical
+      ? snapLine(lum, pixels, box[side], box.top, box.bottom, true, reach, inward)
+      : snapLine(lum, pixels, box[side], box.left, box.right, false, reach, inward);
+    if (at !== null) box[side] = at;
+    isFound[side] = at !== null;
+  }
+  const width = box.right - box.left;
+  const height = box.bottom - box.top;
+  const clipped = { left: Math.max(0, box.left), top: Math.max(0, box.top), right: Math.min(pixels.width, box.right), bottom: Math.min(pixels.height, box.bottom) };
+  if ((clipped.right - clipped.left) < MIN_EDGE_SHARE * width || (clipped.bottom - clipped.top) < MIN_EDGE_SHARE * height) return null;
+  // A line closer to the photo's edge than LINE_REACH can't be seen, so a side there without one was cut off.
+  const cut = {
+    left: !isFound.left && box.left <= LINE_REACH,
+    top: !isFound.top && box.top <= LINE_REACH,
+    right: !isFound.right && box.right >= pixels.width - LINE_REACH,
+    bottom: !isFound.bottom && box.bottom >= pixels.height - LINE_REACH,
+  };
+  return { box: clipped, found: isFound, cut };
+}
+
+/**
+ * Whether a square has enough printed sides, or sides the photo's edge cut
+ * off, to be part of the grid. Every cut side counts here, so a square in a
+ * corner of the photo is placed; classifySquares then counts at most one
+ * (MIN_BORDERED_SIDES), so blank margin there isn't read as a letter square.
+ */
+function onGrid(found: Record<Side, boolean>, cut: Record<Side, boolean>) {
+  return (Object.keys(found) as Side[]).filter((side) => found[side] || cut[side]).length >= MIN_BORDERED_SIDES;
+}
+
+/**
+ * Places the grid's squares on the photo. The lattice gives the square size
+ * and where to start: from the lattice squares whose four sides sit on
+ * printed lines, best first, each new square is placed beside one already
+ * placed and snapped to the lines around it, until the lines run out at a
+ * picture or the grid's edge. A region the lattice is off for, such as the
+ * other page of a spread, starts from its own best-fitting square.
+ */
+function placeSquares(pixels: Pixels, grid: Grid, lum = luminance(pixels)): PlacedSquare[] {
+  const { columns, rows } = grid;
+  const step = (vertical: boolean) => (vertical ? columns.step : rows.step);
+  /** Whether a square's sizes are near the lattice's; a size the photo's edge cut short isn't checked. */
+  const sized = (box: Box, cut: Record<Side, boolean>) => {
+    const fits = (size: number, along: number) => size <= along * MAX_SIZE_FROM_STEP && size >= along / MAX_SIZE_FROM_STEP;
+    return (cut.left || cut.right || fits(box.right - box.left, columns.step)) && (cut.top || cut.bottom || fits(box.bottom - box.top, rows.step));
+  };
+
+  const seedAt = (lattice: Box): Placing | null => {
+    // The top left corner snaps to the nearest lines, even half a square off as on the other page of a spread…
+    const corner = snapBox(lum, pixels, lattice, { left: Math.floor(columns.step / 2), top: Math.floor(rows.step / 2) }, {});
+    if (!corner || !corner.found.left || !corner.found.top) return null;
+    // …and the opposite sides one square on from there.
+    const square = { ...corner.box, right: corner.box.left + columns.step, bottom: corner.box.top + rows.step };
+    const far = Math.max(2, Math.round(SNAP_FAR_SHARE * Math.min(columns.step, rows.step)));
+    const snapped = snapBox(lum, pixels, square, { right: far, bottom: far }, { left: true, top: true });
+    return snapped && Object.values(snapped.found).every(Boolean) ? { row: 0, col: 0, ...snapped } : null;
+  };
+  // Seeds start where the lattice fits best: the lattice squares whose sides moved least when snapped.
+  const candidates: { row: number; col: number; box: Box; seed: Placing; moved: number }[] = [];
+  for (let row = 0; row < rows.lines.length - 1; row += 1) {
+    for (let col = 0; col < columns.lines.length - 1; col += 1) {
+      const box = { left: columns.lines[col], right: columns.lines[col + 1], top: rows.lines[row], bottom: rows.lines[row + 1] };
+      const seed = seedAt(box);
+      if (!seed) continue;
+      const moved = (Object.keys(box) as Side[]).reduce((sum, side) => sum + Math.abs(seed.box[side] - box[side]), 0);
+      candidates.push({ row, col, box, seed, moved });
+    }
+  }
+  candidates.sort((a, b) => a.moved - b.moved);
+
+  // Squares by position, so a square reached under two indices, or from two seeds, is placed once.
+  const bucketSize = Math.max(columns.step, rows.step);
+  const buckets = new Map<string, Placing[]>();
+  const bucketOf = (x: number, y: number) => `${Math.floor(x / bucketSize)},${Math.floor(y / bucketSize)}`;
+  /** Whether a box overlaps a placed square by more than MAX_SQUARE_OVERLAP of the smaller one. */
+  const covered = (box: Box) => {
+    const x = (box.left + box.right) / 2;
+    const y = (box.top + box.bottom) / 2;
+    const area = (b: Box) => (b.right - b.left) * (b.bottom - b.top);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (const other of buckets.get(bucketOf(x + dx * bucketSize, y + dy * bucketSize)) ?? []) {
+          const w = Math.min(box.right, other.box.right) - Math.max(box.left, other.box.left);
+          const h = Math.min(box.bottom, other.box.bottom) - Math.max(box.top, other.box.top);
+          if (w > 0 && h > 0 && w * h > MAX_SQUARE_OVERLAP * Math.min(area(box), area(other.box))) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Each seed grows a region of its own, numbered from its lattice square;
+  // regions are numbered apart afterwards (separateRegions).
+  const regions: { seed: { row: number; col: number }; squares: Map<string, Placing> }[] = [];
+  const key = (row: number, col: number) => `${row},${col}`;
+  for (const candidate of candidates) {
+    const { seed } = candidate;
+    if (covered(seed.box)) continue;
+    const placed = new Map<string, Placing>();
+    regions.push({ seed: candidate, squares: placed });
+    const place = (square: Placing) => {
+      placed.set(key(square.row, square.col), square);
+      const bucket = bucketOf((square.box.left + square.box.right) / 2, (square.box.top + square.box.bottom) / 2);
+      const group = buckets.get(bucket);
+      if (group) group.push(square);
+      else buckets.set(bucket, [square]);
+    };
+    place(seed);
+    const queue: Placing[] = [seed];
+    for (let next = 0; next < queue.length; next += 1) {
+      const from = queue[next];
+      for (const { side, row, col } of STEPS) {
+        const at = { row: from.row + row, col: from.col + col };
+        if (placed.has(key(at.row, at.col))) continue;
+        // A side cut off by the photo's edge has nothing beyond it.
+        if (from.cut[side]) continue;
+        const shared = OPPOSITE[side];
+        const vertical = side === "left" || side === "right";
+        // A size the photo's edge cut short says nothing of the next square's; the lattice's does.
+        const across = vertical ? from.cut.left || from.cut.right : from.cut.top || from.cut.bottom;
+        const alongCut = vertical ? from.cut.top || from.cut.bottom : from.cut.left || from.cut.right;
+        const size = across ? step(vertical) : vertical ? from.box.right - from.box.left : from.box.bottom - from.box.top;
+        const alongSize = alongCut ? step(!vertical) : vertical ? from.box.bottom - from.box.top : from.box.right - from.box.left;
+        const predicted = { ...from.box };
+        predicted[shared] = from.box[side];
+        predicted[side] = from.box[side] + (side === "right" || side === "bottom" ? size : -size);
+        const far = Math.max(2, Math.round(SNAP_FAR_SHARE * size));
+        const along = Math.max(2, Math.round(SNAP_ALONG_SHARE * alongSize));
+        const reaches: Partial<Record<Side, number>> = vertical ? { [side]: far, top: along, bottom: along } : { [side]: far, left: along, right: along };
+        // A side shared with a square already placed is that square's side,
+        // which keeps a column of split clue squares from drifting onto their dividers.
+        for (const other of STEPS) {
+          if (other.side === shared) continue;
+          const neighbour = placed.get(key(at.row + other.row, at.col + other.col));
+          if (!neighbour) continue;
+          predicted[other.side] = neighbour.box[OPPOSITE[other.side]];
+          reaches[other.side] = Math.min(reaches[other.side] ?? along, along);
+        }
+        const snapped = snapBox(lum, pixels, predicted, reaches, { [shared]: from.found[side] });
+        if (!snapped) continue;
+        // Only the size across a cut side is exempt; the other is checked as usual.
+        const cutAcross = vertical ? snapped.cut.left || snapped.cut.right : snapped.cut.top || snapped.cut.bottom;
+        const newSize = vertical ? snapped.box.right - snapped.box.left : snapped.box.bottom - snapped.box.top;
+        if (!cutAcross && (newSize > size * MAX_SIZE_CHANGE || newSize < size / MAX_SIZE_CHANGE)) continue;
+        if (!sized(snapped.box, snapped.cut) || !onGrid(snapped.found, snapped.cut) || covered(snapped.box)) continue;
+        const square = { ...at, ...snapped };
+        place(square);
+        queue.push(square);
+      }
+    }
+  }
+  return separateRegions(regions);
+}
+
+/**
+ * Numbers the squares of all regions from 0 without two sharing an index.
+ * A region keeps its seed's lattice row and column where that is free (the
+ * usual case, one region per page), and otherwise moves right past the
+ * columns already taken, as the other page of a spread is.
+ */
+export function separateRegions(regions: { seed: { row: number; col: number }; squares: Map<string, PlacedSquare> }[]): PlacedSquare[] {
+  const result: PlacedSquare[] = [];
+  const taken = new Set<string>();
+  for (const { seed, squares } of regions) {
+    const own = [...squares.values()];
+    // Growth numbers from the seed at (0, 0); the lattice square it started from places it.
+    const free = (dCol: number) => own.every((square) => !taken.has(`${square.row + seed.row},${square.col + seed.col + dCol}`));
+    let dCol = 0;
+    while (!free(dCol)) dCol += 1;
+    for (const square of own) {
+      const placed = { row: square.row + seed.row, col: square.col + seed.col + dCol, box: square.box, cut: square.cut };
+      taken.add(`${placed.row},${placed.col}`);
+      result.push(placed);
+    }
+  }
+  // Squares grown above or left of where the lattice starts get negative indices.
+  const firstRow = Math.min(...result.map((square) => square.row));
+  const firstCol = Math.min(...result.map((square) => square.col));
+  return result.map((square) => ({ ...square, row: square.row - firstRow, col: square.col - firstCol }));
+}
+
 /** Measures each square's interior and borders and calls it a blank letter square or something else. */
 export function classifySquares(pixels: Pixels, grid: Grid, lum = luminance(pixels)): Square[] {
   const measured: (Measure & {
@@ -611,44 +943,30 @@ export function classifySquares(pixels: Pixels, grid: Grid, lum = luminance(pixe
     core: Measure;
     whole: Measure;
     sides: number;
-    box: { left: number; top: number; right: number; bottom: number };
+    box: Box;
   })[] = [];
-  for (let row = 0; row < grid.rows.lines.length - 1; row += 1) {
-    for (let col = 0; col < grid.columns.lines.length - 1; col += 1) {
-      const box = {
-        left: grid.columns.lines[col],
-        right: grid.columns.lines[col + 1],
-        top: grid.rows.lines[row],
-        bottom: grid.rows.lines[row + 1],
-      };
-      const interior = measure(lum, pixels, box, INSET);
-      const core = measure(lum, pixels, box, CORE_INSET);
-      const whole = measure(lum, pixels, box, EDGE_INSET);
-      if (!interior || !core || !whole) continue;
-      const sides = borderedSides(lum, pixels, box, {
-        left: col === 0 && grid.columns.cut.first,
-        right: col === grid.columns.lines.length - 2 && grid.columns.cut.last,
-        top: row === 0 && grid.rows.cut.first,
-        bottom: row === grid.rows.lines.length - 2 && grid.rows.cut.last,
-      });
-      measured.push({ row, col, ...interior, core, whole, sides, box });
-    }
+  for (const { row, col, box, cut } of placeSquares(pixels, grid, lum)) {
+    const interior = measure(lum, pixels, box, INSET);
+    const core = measure(lum, pixels, box, CORE_INSET);
+    const whole = measure(lum, pixels, box, EDGE_INSET);
+    if (!interior || !core || !whole) continue;
+    const sides = borderedSides(lum, pixels, box, cut);
+    measured.push({ row, col, ...interior, core, whole, sides, box });
   }
   const plain = (area: Measure) => area.ink < MAX_LETTER_INK && area.spread <= MAX_LETTER_SPREAD;
   // Photos are often lit unevenly, so each square is compared with the
   // brightest plain grid square near it, not itself; pictures can't lower it.
-  const columns = grid.columns.lines.length - 1;
-  const paperLevel: (number | undefined)[] = [];
+  const paperLevel = new Map<string, number>();
   for (const square of measured) {
-    if (square.sides >= MIN_BORDERED_SIDES && plain(square)) paperLevel[square.row * columns + square.col] = square.brightness;
+    if (square.sides >= MIN_BORDERED_SIDES && plain(square)) paperLevel.set(`${square.row},${square.col}`, square.brightness);
   }
   const sorted = measured.map((square) => square.brightness).toSorted((a, b) => a - b);
   const pageWhite = sorted[Math.floor(sorted.length * PAGE_WHITE_PERCENTILE)] ?? 255;
   const localWhite = (square: (typeof measured)[number]) => {
     let white: number | undefined;
     for (let row = square.row - WHITE_RADIUS; row <= square.row + WHITE_RADIUS; row += 1) {
-      for (let col = Math.max(0, square.col - WHITE_RADIUS); col <= Math.min(columns - 1, square.col + WHITE_RADIUS); col += 1) {
-        const level = row === square.row && col === square.col ? undefined : paperLevel[row * columns + col];
+      for (let col = square.col - WHITE_RADIUS; col <= square.col + WHITE_RADIUS; col += 1) {
+        const level = row === square.row && col === square.col ? undefined : paperLevel.get(`${row},${col}`);
         if (level !== undefined && (white === undefined || level > white)) white = level;
       }
     }
@@ -677,22 +995,20 @@ export function classifySquares(pixels: Pixels, grid: Grid, lum = luminance(pixe
     const rest = bordered(square) && !empty && !marked ? pastStrip(lum, pixels, box) : null;
     const restMeasure = rest && measure(lum, pixels, rest, STRIP_INSET);
     const stripped = restMeasure !== null && blank(restMeasure, square);
-    return { row, col, kind: empty || marked || stripped ? "letter" : "other", marked: marked || stripped, ink, brightness, spread };
+    return { row, col, box, kind: empty || marked || stripped ? "letter" : "other", marked: marked || stripped, ink, brightness, spread };
   });
 }
 
 /** Letter squares as app cells, in 0–1000 coordinates relative to the image. */
-export function toLetterCells(pixels: Pixels, grid: Grid, squares: Square[]): LetterCell[] {
+export function toLetterCells(pixels: Pixels, squares: Square[]): LetterCell[] {
   const sx = 1000 / pixels.width;
   const sy = 1000 / pixels.height;
   return squares
     .filter((square) => square.kind === "letter")
-    .map((square) => {
-      const x = Math.round(grid.columns.lines[square.col] * sx);
-      const y = Math.round(grid.rows.lines[square.row] * sy);
-      const w = Math.round(grid.columns.lines[square.col + 1] * sx) - x;
-      const h = Math.round(grid.rows.lines[square.row + 1] * sy) - y;
-      return { row: square.row, col: square.col, x, y, w, h };
+    .map(({ row, col, box }) => {
+      const x = Math.round(box.left * sx);
+      const y = Math.round(box.top * sy);
+      return { row, col, x, y, w: Math.round(box.right * sx) - x, h: Math.round(box.bottom * sy) - y };
     });
 }
 
@@ -705,6 +1021,6 @@ export function readGrid(pixels: Pixels): LetterCell[] | null {
   const lum = luminance(pixels);
   const grid = findGrid(pixels, lum);
   if (!grid) return null;
-  const cells = dedupeCells(toLetterCells(pixels, grid, classifySquares(pixels, grid, lum)).filter(isLetterCell));
+  const cells = dedupeCells(toLetterCells(pixels, classifySquares(pixels, grid, lum)).filter(isLetterCell));
   return cells.length >= MIN_CELLS && cells.length <= MAX_CELLS ? cells : null;
 }
