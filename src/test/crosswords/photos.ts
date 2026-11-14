@@ -181,6 +181,26 @@ export const CROSSWORD_PHOTOS: CrosswordPhoto[] = [
       "clue area at (559, 882) read as letter square (15,7)",
     ],
   },
+  {
+    name: "rullstolen",
+    description: "newsprint in dim light, with the back page showing through and teal numbered squares",
+    minCells: 120,
+    // Spread over the squares the back page shows through (lower left, right edge), the teal squares 1–5 and the yellow row.
+    letterPoints: [
+      [92.5, 778], [147, 840], [92.5, 961], [912.5, 108], [857.5, 164], [689, 227], [857.5, 409], [92.5, 593], [580, 654],
+      [362.5, 836], [912.5, 900], [634, 961], [912.5, 283], [525, 346], [312.5, 470], [967.5, 593], [802, 840],
+    ],
+    // The second clue point is a plain patch of wall in the photo, tinted like a solution square.
+    cluePoints: [[197, 409], [145.6, 49], [35.6, 513], [472, 532], [857.5, 846], [187.5, 186], [884, 967], [689, 409], [525, 714], [967.5, 45], [34, 963]],
+    // Gemini's recorded reply; the image reading finds every labelled square.
+    knownProblems: [
+      "letter square at (912.5, 108) not found",
+      "letter square at (857.5, 409) not found",
+      "letter square at (580, 654) not found",
+      "letter square at (362.5, 836) not found",
+      "clue area at (857.5, 846) read as letter square (10,11)",
+    ],
+  },
 ];
 
 const DIRECTORY = fileURLToPath(new URL(".", import.meta.url));

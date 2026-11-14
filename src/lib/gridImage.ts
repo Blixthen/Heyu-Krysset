@@ -76,11 +76,15 @@ const INSET = 0.2;
 /** A blank letter square has less than this share of ink in its interior. */
 const MAX_LETTER_INK = 0.02;
 /**
- * …is at most this much darker than the page's white (the 90th percentile of
- * square brightness), which keeps white and yellow squares and drops grey
- * blocks, whatever the photo's exposure.
+ * …is at most this much darker than the white around it (see WHITE_RADIUS),
+ * which keeps white and yellow squares and drops grey blocks, whatever the
+ * photo's exposure and however unevenly it is lit.
  */
 const MAX_LETTER_DIMMING = 25;
+/** The white is that of the brightest plain grid square within this many rows and columns… */
+const WHITE_RADIUS = 2;
+/** …or, with none near, the page's: the 90th percentile of square brightness. */
+const PAGE_WHITE_PERCENTILE = 0.9;
 /**
  * …or, if darker and wholly empty, is tinted: its colour (each channel over
  * the channel mean) differs by at least this much in some channel from both
@@ -89,6 +93,11 @@ const MAX_LETTER_DIMMING = 25;
  * warm photo out, the neutral check grey on cream paper.
  */
 const MIN_LETTER_TINT = 0.05;
+/**
+ * …but pale: no channel more than this far from neutral, since a saturated
+ * colour is a block or a picture. (A dark one already fails as ink, INK.)
+ */
+const MAX_LETTER_TINT = 0.3;
 /** …is this even (standard deviation of luminance), which rules out photographs. */
 const MAX_LETTER_SPREAD = 22;
 /**
@@ -97,8 +106,31 @@ const MAX_LETTER_SPREAD = 22;
  * one of them, so a cut-off corner square still needs its two inner sides.
  */
 const MIN_BORDERED_SIDES = 3;
-/** How far (px) from the lattice line to look for a square's printed border. */
+/**
+ * A tinted square needs all four: a coloured area of a picture, such as a
+ * wall, is as even and tinted as a solution square, but the grid lines that
+ * end at the picture's frame leave it without a full set.
+ */
+const TINTED_BORDERED_SIDES = 4;
+/**
+ * A solution square's number stays within this share of its side from the
+ * corner (in a photo, a little past 0.4 with the lattice slightly off); a
+ * clue's word, centred, reaches further.
+ */
+const CORNER_MARK = 0.5;
+/** How far (px) from a line's expected place to look for it. */
 const BORDER_REACH = 4;
+/**
+ * A square's own border may also sit up to this share of its side away: the
+ * lattice is straight, but a photographed page is often a little tilted or
+ * curved, which puts a row's line a good few px higher at one end than the
+ * other. There it must be a straight, unbroken line: within SHIFTED_REACH px
+ * of one offset along at least MIN_SHIFTED_COVER of the side. Text and a
+ * picture's texture wander and leave gaps.
+ */
+const BORDER_SHIFT_SHARE = 0.15;
+const SHIFTED_REACH = 1;
+const MIN_SHIFTED_COVER = 0.95;
 /** A side counts as bordered when line pixels cover this share of it. */
 const MIN_BORDER_COVER = 0.6;
 /** Rows and columns may have steps that differ by this factor; printed squares are close to square. */
@@ -139,14 +171,47 @@ const MIN_STRIP_LINE_COVER = 0.9;
 const STRIP_LINE_REACH = 2;
 /** A square cut off by the photo's edge is still read when at least this share of it is in the photo. */
 const MIN_EDGE_SHARE = 0.6;
+/**
+ * The paper is the brightest large area, so its white is the brightness only
+ * this share of the photo is darker than, even with a dark table or pictures around the page.
+ */
+const PAPER_PERCENTILE = 0.98;
+/** Every this many pixels is enough to find the paper's brightness. */
+const PAPER_SAMPLE_STEP = 7;
+/** At most this much brighter, so a dark photo's noise isn't blown up into lines and ink. */
+const MAX_GAIN = 2;
 
+/**
+ * Luminance scaled so the paper is white (255), whatever the light: every
+ * threshold here (INK, LINE_CONTRAST, MAX_LETTER_DIMMING) is set for white
+ * paper, and in a dim photo the back page showing through thin newsprint is
+ * as dark as INK before scaling, while the print stays much darker.
+ */
 function luminance(pixels: Pixels): Float32Array {
   const { width, height, data } = pixels;
   const out = new Float32Array(width * height);
   for (let i = 0; i < out.length; i += 1) {
     out[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
   }
+  const gain = Math.min(MAX_GAIN, 255 / Math.max(1, paperWhite(out)));
+  if (gain > 1) for (let i = 0; i < out.length; i += 1) out[i] = Math.min(255, out[i] * gain);
   return out;
+}
+
+/** The page's white: a high percentile of luminance, since paper covers most of a crossword page. */
+function paperWhite(lum: Float32Array) {
+  const histogram = new Uint32Array(256);
+  let count = 0;
+  for (let i = 0; i < lum.length; i += PAPER_SAMPLE_STEP) {
+    histogram[Math.min(255, Math.floor(lum[i]))] += 1;
+    count += 1;
+  }
+  let below = 0;
+  for (let level = 0; level < 256; level += 1) {
+    below += histogram[level];
+    if (below > count * PAPER_PERCENTILE) return level;
+  }
+  return 255;
 }
 
 /**
@@ -304,8 +369,7 @@ function leastSquares(xs: number[], ys: number[]) {
   return { slope, intercept: my - slope * mx };
 }
 
-export function findGrid(pixels: Pixels): Grid | null {
-  const lum = luminance(pixels);
+export function findGrid(pixels: Pixels, lum = luminance(pixels)): Grid | null {
   const columnLines = stripLines(lum, pixels, true);
   const rowLines = stripLines(lum, pixels, false);
   let columns = fitLattice(columnLines, pixels.width);
@@ -348,15 +412,31 @@ function merge(lines: { at: number; weight: number }[]) {
   return merged;
 }
 
-/** Share of one side of a square that has line pixels within BORDER_REACH of it. */
-function borderCover(lum: Float32Array, pixels: Pixels, at: number, from: number, to: number, vertical: boolean) {
+/**
+ * Share of one side of a square that has line pixels within BORDER_REACH of
+ * it, or of a line parallel to it up to `shift` px away, whichever covers most.
+ */
+function borderCover(lum: Float32Array, pixels: Pixels, at: number, from: number, to: number, vertical: boolean, shift = 0) {
+  const near = lineCover(lum, pixels, at, from, to, vertical, BORDER_REACH);
+  if (shift === 0 || near >= MIN_BORDER_COVER) return near;
+  let best = near;
+  for (let centre = -shift; centre <= shift; centre += 1) {
+    if (centre === 0) continue;
+    const shifted = lineCover(lum, pixels, at + centre, from, to, vertical, SHIFTED_REACH);
+    if (shifted >= MIN_SHIFTED_COVER) best = Math.max(best, shifted);
+  }
+  return best;
+}
+
+/** Share of samples along a side that have a line pixel within `reach` px of `at`. */
+function lineCover(lum: Float32Array, pixels: Pixels, at: number, from: number, to: number, vertical: boolean, reach: number) {
   const { width, height } = pixels;
   const length = vertical ? width : height;
   let samples = 0;
   let hits = 0;
   for (let t = from + (to - from) * 0.15; t <= from + (to - from) * 0.85; t += 1) {
     samples += 1;
-    for (let d = -BORDER_REACH; d <= BORDER_REACH; d += 1) {
+    for (let d = -reach; d <= reach; d += 1) {
       const x = Math.round(vertical ? at + d : t);
       const y = Math.round(vertical ? t : at + d);
       if (x < 0 || y < 0 || x >= width || y >= height) continue;
@@ -417,6 +497,29 @@ function stripLineCover(lum: Float32Array, pixels: Pixels, y: number, left: numb
 }
 
 /**
+ * Whether all ink just inside the square's borders lies in one corner, within
+ * CORNER_MARK of its side from that corner, as a solution square's number does.
+ */
+function cornerMarkOnly(lum: Float32Array, pixels: Pixels, box: { left: number; top: number; right: number; bottom: number }) {
+  const width = box.right - box.left;
+  const height = box.bottom - box.top;
+  const inner = { left: box.left + EDGE_INSET * width, top: box.top + EDGE_INSET * height, right: box.right - EDGE_INSET * width, bottom: box.bottom - EDGE_INSET * height };
+  const clean = (area: typeof inner) => (measure(lum, pixels, area, 0)?.ink ?? 0) < MAX_LETTER_INK;
+  return [
+    [box.left + CORNER_MARK * width, box.top + CORNER_MARK * height, true, true],
+    [box.right - CORNER_MARK * width, box.top + CORNER_MARK * height, false, true],
+    [box.left + CORNER_MARK * width, box.bottom - CORNER_MARK * height, true, false],
+    [box.right - CORNER_MARK * width, box.bottom - CORNER_MARK * height, false, false],
+  ].some(([x, y, left, top]) => {
+    // The rest of the square is the band beside the corner plus everything past it.
+    const beside = left ? { ...inner, left: x as number } : { ...inner, right: x as number };
+    const below = top ? { ...inner, top: y as number } : { ...inner, bottom: y as number };
+    const besideCorner = top ? { ...beside, bottom: y as number } : { ...beside, top: y as number };
+    return clean(besideCorner) && clean(below);
+  });
+}
+
+/**
  * How many sides have a printed border, plus one if a side without one was
  * cut off by the photo's edge (see MIN_BORDERED_SIDES).
  */
@@ -427,11 +530,14 @@ function borderedSides(
   cut: { left: boolean; top: boolean; right: boolean; bottom: boolean },
 ) {
   const { left, top, right, bottom } = box;
+  // A side's line moves across it: the left and right sides sideways, by a share of the width.
+  const sideways = Math.round(BORDER_SHIFT_SHARE * (right - left));
+  const upDown = Math.round(BORDER_SHIFT_SHARE * (bottom - top));
   const sides = [
-    { printed: borderCover(lum, pixels, left, top, bottom, true) >= MIN_BORDER_COVER, cut: cut.left },
-    { printed: borderCover(lum, pixels, right, top, bottom, true) >= MIN_BORDER_COVER, cut: cut.right },
-    { printed: borderCover(lum, pixels, top, left, right, false) >= MIN_BORDER_COVER, cut: cut.top },
-    { printed: borderCover(lum, pixels, bottom, left, right, false) >= MIN_BORDER_COVER, cut: cut.bottom },
+    { printed: borderCover(lum, pixels, left, top, bottom, true, sideways) >= MIN_BORDER_COVER, cut: cut.left },
+    { printed: borderCover(lum, pixels, right, top, bottom, true, sideways) >= MIN_BORDER_COVER, cut: cut.right },
+    { printed: borderCover(lum, pixels, top, left, right, false, upDown) >= MIN_BORDER_COVER, cut: cut.top },
+    { printed: borderCover(lum, pixels, bottom, left, right, false, upDown) >= MIN_BORDER_COVER, cut: cut.bottom },
   ];
   const printed = sides.filter((side) => side.printed).length;
   return printed + (sides.some((side) => !side.printed && side.cut) ? 1 : 0);
@@ -498,8 +604,7 @@ function hueDistance(a: Colour, b: Colour) {
 }
 
 /** Measures each square's interior and borders and calls it a blank letter square or something else. */
-export function classifySquares(pixels: Pixels, grid: Grid): Square[] {
-  const lum = luminance(pixels);
+export function classifySquares(pixels: Pixels, grid: Grid, lum = luminance(pixels)): Square[] {
   const measured: (Measure & {
     row: number;
     col: number;
@@ -529,26 +634,49 @@ export function classifySquares(pixels: Pixels, grid: Grid): Square[] {
       measured.push({ row, col, ...interior, core, whole, sides, box });
     }
   }
-  const sorted = measured.map((square) => square.brightness).toSorted((a, b) => a - b);
-  const white = sorted[Math.floor(sorted.length * 0.9)] ?? 255;
   const plain = (area: Measure) => area.ink < MAX_LETTER_INK && area.spread <= MAX_LETTER_SPREAD;
-  const blank = (area: Measure) => plain(area) && area.brightness >= white - MAX_LETTER_DIMMING;
+  // Photos are often lit unevenly, so each square is compared with the
+  // brightest plain grid square near it, not itself; pictures can't lower it.
+  const columns = grid.columns.lines.length - 1;
+  const paperLevel: (number | undefined)[] = [];
+  for (const square of measured) {
+    if (square.sides >= MIN_BORDERED_SIDES && plain(square)) paperLevel[square.row * columns + square.col] = square.brightness;
+  }
+  const sorted = measured.map((square) => square.brightness).toSorted((a, b) => a - b);
+  const pageWhite = sorted[Math.floor(sorted.length * PAGE_WHITE_PERCENTILE)] ?? 255;
+  const localWhite = (square: (typeof measured)[number]) => {
+    let white: number | undefined;
+    for (let row = square.row - WHITE_RADIUS; row <= square.row + WHITE_RADIUS; row += 1) {
+      for (let col = Math.max(0, square.col - WHITE_RADIUS); col <= Math.min(columns - 1, square.col + WHITE_RADIUS); col += 1) {
+        const level = row === square.row && col === square.col ? undefined : paperLevel[row * columns + col];
+        if (level !== undefined && (white === undefined || level > white)) white = level;
+      }
+    }
+    return white ?? pageWhite;
+  };
+  const whites = new Map(measured.map((square) => [square, localWhite(square)]));
+  const blank = (area: Measure, square: (typeof measured)[number]) =>
+    plain(area) && area.brightness >= (whites.get(square) ?? 255) - MAX_LETTER_DIMMING;
   const bordered = (square: (typeof measured)[number]) => square.sides >= MIN_BORDERED_SIDES;
-  const paper = average(measured.filter((square) => bordered(square) && blank(square)).map((square) => hue(pixels, square.box, INSET)));
-  // Only a whole empty square may be tinted: a tinted clue square can have a
-  // blank centre or a blank part past a line, and must not pass as marked.
-  const tintedEmpty = (square: (typeof measured)[number]) => {
-    if (paper === null || !plain(square)) return false;
-    const colour = hue(pixels, square.box, INSET);
-    return hueDistance(colour, paper) >= MIN_LETTER_TINT && hueDistance(colour, NEUTRAL) >= MIN_LETTER_TINT;
+  const paper = average(measured.filter((square) => bordered(square) && blank(square, square)).map((square) => hue(pixels, square.box, INSET)));
+  const tinted = (square: (typeof measured)[number], inset: number) => {
+    if (paper === null) return false;
+    const colour = hue(pixels, square.box, inset);
+    const fromNeutral = hueDistance(colour, NEUTRAL);
+    return hueDistance(colour, paper) >= MIN_LETTER_TINT && fromNeutral >= MIN_LETTER_TINT && fromNeutral <= MAX_LETTER_TINT;
   };
   return measured.map((square) => {
     const { row, col, ink, brightness, spread, core, whole, box } = square;
-    const empty = bordered(square) && (blank(square) || tintedEmpty(square));
-    const marked = bordered(square) && !empty && blank(core) && whole.ink < MAX_MARK_INK && !divided(lum, pixels, box);
+    const enclosed = square.sides >= TINTED_BORDERED_SIDES;
+    const empty = bordered(square) && (blank(square, square) || (enclosed && plain(square) && tinted(square, INSET)));
+    // A tinted letter square may carry a number in one corner; a tinted clue
+    // square with a blank centre has words reaching past it.
+    const numbered = enclosed && plain(core) && tinted(square, CORE_INSET) && cornerMarkOnly(lum, pixels, box);
+    const blankCore = blank(core, square) || numbered;
+    const marked = bordered(square) && !empty && blankCore && whole.ink < MAX_MARK_INK && !divided(lum, pixels, box);
     const rest = bordered(square) && !empty && !marked ? pastStrip(lum, pixels, box) : null;
     const restMeasure = rest && measure(lum, pixels, rest, STRIP_INSET);
-    const stripped = restMeasure !== null && blank(restMeasure);
+    const stripped = restMeasure !== null && blank(restMeasure, square);
     return { row, col, kind: empty || marked || stripped ? "letter" : "other", marked: marked || stripped, ink, brightness, spread };
   });
 }
@@ -574,8 +702,9 @@ export function toLetterCells(pixels: Pixels, grid: Grid, squares: Square[]): Le
  * pass the same validation as Gemini's, so either source yields the same shape.
  */
 export function readGrid(pixels: Pixels): LetterCell[] | null {
-  const grid = findGrid(pixels);
+  const lum = luminance(pixels);
+  const grid = findGrid(pixels, lum);
   if (!grid) return null;
-  const cells = dedupeCells(toLetterCells(pixels, grid, classifySquares(pixels, grid)).filter(isLetterCell));
+  const cells = dedupeCells(toLetterCells(pixels, grid, classifySquares(pixels, grid, lum)).filter(isLetterCell));
   return cells.length >= MIN_CELLS && cells.length <= MAX_CELLS ? cells : null;
 }
