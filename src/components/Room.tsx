@@ -102,12 +102,13 @@ export function Room({
           />
         </picture>
         <div className="flex min-w-0 items-center gap-3 sm:row-start-1">
-          <span className="flex size-10 items-center justify-center rounded-2xl bg-sky-400/15 text-sky-300">
+          {/* Phones need the room for the buttons beside the title. */}
+          <span className="hidden size-10 shrink-0 items-center justify-center rounded-2xl bg-sky-400/15 text-sky-300 sm:flex">
             <Grid3x3 className="size-5" />
           </span>
-          <div>
-            <p className="text-sm font-semibold text-slate-50">Heyus Fredagskryss</p>
-            <p className="text-xs text-slate-400">Inloggad som {nickname}</p>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-50">Heyus Fredagskryss</p>
+            <p className="truncate text-xs text-slate-400">Inloggad som {nickname}</p>
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
@@ -128,7 +129,7 @@ export function Room({
           <button
             type="button"
             onClick={onLeave}
-            className="min-h-11 rounded-full border border-slate-700 px-3 py-1.5 text-sm font-bold text-slate-300 transition hover:border-slate-500 hover:text-white"
+            className="min-h-9 shrink-0 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
           >
             Byt namn
           </button>
@@ -167,19 +168,17 @@ export function Room({
             // Keyed by puzzle, so a new photo starts over with its own squares.
             <CellEditor key={draft.puzzle.id} puzzle={draft.puzzle} onDone={shareDraft} onCancel={() => setDraft(null)} />
           ) : puzzle ? (
-            <div className="flex min-h-0 w-full flex-col gap-2">
-              <PlayerLegend colours={colours} />
-              <div className="min-h-0 flex-1">
-                <CrosswordGrid
-                  puzzle={puzzle}
-                  letters={letters}
-                  authors={authors}
-                  colours={colours}
-                  selectedCell={selectedCell}
-                  onSelect={setSelectedCell}
-                  onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
-                />
-              </div>
+            <div className="min-h-0 w-full">
+              <CrosswordGrid
+                puzzle={puzzle}
+                letters={letters}
+                authors={authors}
+                colours={colours}
+                selectedCell={selectedCell}
+                onSelect={setSelectedCell}
+                onLetter={(cell, letter) => room.setLetter(cell.row, cell.col, letter)}
+                toolbar={<PlayerLegend colours={colours} />}
+              />
             </div>
           ) : (
             <PuzzleUploader onRead={setDraft} />

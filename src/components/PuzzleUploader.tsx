@@ -188,10 +188,12 @@ export function PuzzleUploader({
           type="button"
           disabled={isAnalyzing}
           onClick={() => fileInputRef.current?.click()}
+          aria-label={isAnalyzing ? "Tolkar…" : "Nytt korsord"}
           className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-wait"
         >
           {isAnalyzing ? <Loader2 className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />}
-          {isAnalyzing ? "Tolkar…" : "Nytt korsord"}
+          {/* Phones only fit the icon beside the other buttons. */}
+          <span className="hidden sm:inline">{isAnalyzing ? "Tolkar…" : "Nytt korsord"}</span>
         </button>
       </div>
     );
