@@ -16,11 +16,10 @@ import {
   type LetterCell,
   type Letters,
 } from "@/lib/crossword";
-import { useZoom } from "@/hooks/useZoom";
 import { photoUrl } from "@/lib/photo";
-import { BASE_WIDTH_PX } from "@/lib/zoom";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { PLAYER_COLOURS } from "./PlayerLegend";
+import { cellPlacement, ZoomablePhoto } from "./ZoomablePhoto";
 
 const ARROWS: Record<string, { direction: Direction; rowStep: -1 | 0 | 1; colStep: -1 | 0 | 1 }> = {
   ArrowRight: { direction: "across", rowStep: 0, colStep: 1 },
@@ -69,8 +68,6 @@ export function CrosswordGrid({
   // Set while typing or an arrow key moves focus, so that focus keeps going the
   // same way instead of being read as a tap on the next cell.
   const moving = useRef(false);
-  const viewRef = useRef<HTMLDivElement>(null);
-  const { zoom, zoomIn, zoomOut, reset } = useZoom(viewRef);
 
   function setDirection(next: Direction) {
     directionRef.current = next;
@@ -128,97 +125,72 @@ export function CrosswordGrid({
   }
 
   return (
-    <div className="relative h-full max-h-full w-full">
-      <div
-        ref={viewRef}
-        className="h-full max-h-full w-full touch-pan-x touch-pan-y overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
-      >
-        {/* A size container, so letters can grow with their squares (cqw). */}
-        <div className="@container relative mx-auto" style={{ width: `calc(max(100%, ${BASE_WIDTH_PX}px) * ${zoom})` }}>
-          {/* A data: URL from a peer; next/image cannot optimize it. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={puzzle.image} alt="Korsordet" className="block h-auto w-full select-none" />
-          {/* The sharp stored copy covers the inline one once it loads, and stays hidden if it can't. */}
-          {puzzle.photo && failedPhoto !== puzzle.photo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photoUrl(puzzle.photo)}
-              alt=""
-              className="absolute inset-0 size-full select-none"
-              onError={() => setFailedPhoto(puzzle.photo ?? null)}
-            />
-          ) : null}
-          {puzzle.cells.map((cell) => {
-            const key = cellKey(cell.row, cell.col);
-            const isSelected = selectedCell?.row === cell.row && selectedCell?.col === cell.col;
-            const inWord = activeWord.size > 1 && activeWord.has(key);
-            const letter = letters[key] ?? "";
-            const slot = letter ? colours.get(authors[key] ?? "") : undefined;
-            const tint = slot === undefined ? null : PLAYER_COLOURS[slot].tint;
-            // In the selected word a typed letter keeps its player's tint and gets an outline instead.
-            const background = letter ? (tint ?? (inWord ? "bg-sky-100/90" : "bg-white/80")) : inWord ? "bg-sky-300/35" : "bg-white/15";
-            const ring = isSelected ? "ring-2 ring-sky-500 ring-inset" : inWord && tint ? "ring-1 ring-sky-400 ring-inset" : "";
-            return (
-              <input
-                key={key}
-                id={cellInputId(cell)}
-                aria-label={`Rad ${cell.row + 1}, ruta ${cell.col + 1}`}
-                value={letter}
-                inputMode="text"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                onPointerDown={(event) => {
-                  wasFocused.current = document.activeElement === event.currentTarget;
-                }}
-                onPointerCancel={() => {
-                  wasFocused.current = false;
-                }}
-                onClick={() => {
-                  if (wasFocused.current) setDirection(toggleDirection(puzzle.cells, cell, directionRef.current));
-                  wasFocused.current = false;
-                }}
-                onFocus={(event) => {
-                  const choose = moving.current ? chooseDirection : directionForTap;
-                  setDirection(choose(puzzle.cells, cell, directionRef.current));
-                  onSelect({ row: cell.row, col: cell.col });
-                  const input = event.currentTarget;
-                  input.select();
-                  input.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-                }}
-                onChange={(event) => {
-                  // No maxLength: typing into a filled cell replaces its letter.
-                  const next = oneLetter(event.target.value);
-                  onLetter({ row: cell.row, col: cell.col }, next);
-                  if (next) forward(cell);
-                }}
-                onKeyDown={(event) => onKeyDown(cell, letter, event)}
-                style={{
-                  // At least 16 px, below which iOS zooms the page when a square gets focus.
-                  fontSize: `max(1rem, ${cell.w * LETTER_SIZE}cqw)`,
-                  left: `${cell.x / 10}%`,
-                  top: `${cell.y / 10}%`,
-                  width: `${cell.w / 10}%`,
-                  height: `${cell.h / 10}%`,
-                }}
-                className={`absolute touch-manipulation scroll-mt-3 scroll-mb-[30vh] border border-transparent text-center text-base font-bold text-slate-950 uppercase outline-none ${background} ${ring}`}
-              />
-            );
-          })}
-        </div>
-      </div>
-      <div className="absolute top-2 right-2 flex overflow-hidden rounded-lg border border-slate-700 bg-slate-900/85 text-sm text-slate-100 shadow-lg backdrop-blur">
-        <button type="button" onClick={zoomOut} aria-label="Zooma ut" className="px-3 py-1.5 hover:bg-slate-800">
-          −
-        </button>
-        <button type="button" onClick={reset} aria-label="Återställ zoom" className="min-w-14 px-2 py-1.5 tabular-nums hover:bg-slate-800">
-          {Math.round(zoom * 100)} %
-        </button>
-        <button type="button" onClick={zoomIn} aria-label="Zooma in" className="px-3 py-1.5 hover:bg-slate-800">
-          +
-        </button>
-      </div>
-    </div>
+    <ZoomablePhoto image={puzzle.image}>
+      {/* The sharp stored copy covers the inline one once it loads, and stays hidden if it can't. */}
+      {puzzle.photo && failedPhoto !== puzzle.photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={photoUrl(puzzle.photo)}
+          alt=""
+          className="absolute inset-0 size-full select-none"
+          onError={() => setFailedPhoto(puzzle.photo ?? null)}
+        />
+      ) : null}
+      {puzzle.cells.map((cell) => {
+        const key = cellKey(cell.row, cell.col);
+        const isSelected = selectedCell?.row === cell.row && selectedCell?.col === cell.col;
+        const inWord = activeWord.size > 1 && activeWord.has(key);
+        const letter = letters[key] ?? "";
+        const slot = letter ? colours.get(authors[key] ?? "") : undefined;
+        const tint = slot === undefined ? null : PLAYER_COLOURS[slot].tint;
+        // In the selected word a typed letter keeps its player's tint and gets an outline instead.
+        const background = letter ? (tint ?? (inWord ? "bg-sky-100/90" : "bg-white/80")) : inWord ? "bg-sky-300/35" : "bg-white/15";
+        const ring = isSelected ? "ring-2 ring-sky-500 ring-inset" : inWord && tint ? "ring-1 ring-sky-400 ring-inset" : "";
+        return (
+          <input
+            key={key}
+            id={cellInputId(cell)}
+            aria-label={`Rad ${cell.row + 1}, ruta ${cell.col + 1}`}
+            value={letter}
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            onPointerDown={(event) => {
+              wasFocused.current = document.activeElement === event.currentTarget;
+            }}
+            onPointerCancel={() => {
+              wasFocused.current = false;
+            }}
+            onClick={() => {
+              if (wasFocused.current) setDirection(toggleDirection(puzzle.cells, cell, directionRef.current));
+              wasFocused.current = false;
+            }}
+            onFocus={(event) => {
+              const choose = moving.current ? chooseDirection : directionForTap;
+              setDirection(choose(puzzle.cells, cell, directionRef.current));
+              onSelect({ row: cell.row, col: cell.col });
+              const input = event.currentTarget;
+              input.select();
+              input.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+            }}
+            onChange={(event) => {
+              // No maxLength: typing into a filled cell replaces its letter.
+              const next = oneLetter(event.target.value);
+              onLetter({ row: cell.row, col: cell.col }, next);
+              if (next) forward(cell);
+            }}
+            onKeyDown={(event) => onKeyDown(cell, letter, event)}
+            style={{
+              // At least 16 px, below which iOS zooms the page when a square gets focus.
+              fontSize: `max(1rem, ${cell.w * LETTER_SIZE}cqw)`,
+              ...cellPlacement(cell),
+            }}
+            className={`absolute touch-manipulation scroll-mt-3 scroll-mb-[30vh] border border-transparent text-center text-base font-bold text-slate-950 uppercase outline-none ${background} ${ring}`}
+          />
+        );
+      })}
+    </ZoomablePhoto>
   );
 }

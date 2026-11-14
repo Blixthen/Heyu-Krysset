@@ -1,20 +1,26 @@
 // @vitest-environment jsdom
 import { emptyBoard } from "@/lib/board";
-import { makePuzzle } from "@/test/fixtures";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { gridCells, makePuzzle } from "@/test/fixtures";
+import type { CrosswordPuzzle } from "@/lib/crossword";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const room = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/hooks/useCrosswordRoom", () => ({ useCrosswordRoom: () => room.current }));
-// The real uploader, with its latest onPhoto kept so a test can report a stored photo.
-const uploader = vi.hoisted(() => ({ onPhoto: undefined as ((puzzleId: string, photo: string) => void) | undefined }));
+// The real uploader, with its latest onRead kept so a test can hand over a read photo,
+// and keepPuzzle mocked so a test can report a stored photo through its onPhoto.
+const uploader = vi.hoisted(() => ({
+  onRead: undefined as ((draft: { puzzle: CrosswordPuzzle; file: File }) => void) | undefined,
+  keepPuzzle: vi.fn(),
+}));
 vi.mock("./PuzzleUploader", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./PuzzleUploader")>();
   const { createElement } = await import("react");
   return {
     ...actual,
+    keepPuzzle: uploader.keepPuzzle,
     PuzzleUploader: (props: Parameters<typeof actual.PuzzleUploader>[0]) => {
-      uploader.onPhoto = props.onPhoto;
+      uploader.onRead = props.onRead;
       return createElement(actual.PuzzleUploader, props);
     },
   };
@@ -45,6 +51,7 @@ function roomState(overrides: object = {}) {
 }
 
 describe("Room", () => {
+  beforeEach(() => uploader.keepPuzzle.mockClear());
   afterEach(cleanup);
 
   it("shows the uploader when there is no puzzle", () => {
@@ -60,6 +67,50 @@ describe("Room", () => {
     render(<Room nickname="Nova" onLeave={() => {}} />);
     expect(screen.getByText("Nytt korsord")).toBeTruthy();
     expect(screen.getAllByRole("textbox").length).toBeGreaterThan(1);
+  });
+
+  it("lets the player fix the squares of a read photo before sharing it, and keeps it once shared", () => {
+    const publishPuzzle = vi.fn();
+    room.current = roomState({ publishPuzzle });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    const read = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c", createdAt: 1_000 });
+    const file = new File(["x"], "kryss.jpg");
+    act(() => uploader.onRead?.({ puzzle: read, file }));
+    expect(publishPuzzle).not.toHaveBeenCalled();
+    expect(screen.queryByText("Här hamnar korsordet")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort rutan på rad 2, kolumn 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till en ruta på rad 1, kolumn 4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Klar" }));
+
+    const shared = publishPuzzle.mock.calls[0][0];
+    const cells = [...gridCells().filter((cell) => !(cell.row === 1 && cell.col === 1)), { row: 0, col: 3, x: 400, y: 100, w: 90, h: 90 }];
+    expect(shared).toEqual({ ...read, createdAt: shared.createdAt, cells: cells.sort((a, b) => a.row - b.row || a.col - b.col) });
+    // Newer than anything shared while it was being fixed.
+    expect(shared.createdAt).toBeGreaterThan(read.createdAt);
+    expect(uploader.keepPuzzle).toHaveBeenCalledWith(shared, file, expect.any(Function));
+  });
+
+  it("hides starting over while a new photo's squares are checked, since its puzzle is out of sight", () => {
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} } });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    expect(screen.getByRole("button", { name: "Börja om" })).toBeTruthy();
+    act(() => uploader.onRead?.({ puzzle: makePuzzle({ id: "next" }), file: new File(["x"], "kryss.jpg") }));
+    expect(screen.queryByRole("button", { name: "Börja om" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(screen.getByRole("button", { name: "Börja om" })).toBeTruthy();
+  });
+
+  it("shares nothing when fixing the squares is cancelled", () => {
+    const publishPuzzle = vi.fn();
+    room.current = roomState({ publishPuzzle });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    act(() => uploader.onRead?.({ puzzle: makePuzzle(), file: new File(["x"], "kryss.jpg") }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(screen.getByText("Här hamnar korsordet")).toBeTruthy();
+    expect(publishPuzzle).not.toHaveBeenCalled();
+    expect(uploader.keepPuzzle).not.toHaveBeenCalled();
   });
 
   it("starts the same crossword over as a new puzzle for everyone, with its own saved link", async () => {
@@ -92,17 +143,20 @@ describe("Room", () => {
     const attachPhoto = vi.fn((puzzleId: string) => (puzzleId === original.id ? copy : null));
     room.current = roomState({ board: { puzzle: copy, letters: {}, authors: {} }, attachPhoto });
     render(<Room nickname="Nova" onLeave={() => {}} />);
+    act(() => uploader.onRead?.({ puzzle: original, file: new File(["x"], "kryss.jpg") }));
+    fireEvent.click(screen.getByRole("button", { name: "Klar" }));
+    const onPhoto = uploader.keepPuzzle.mock.calls.at(-1)?.[2] as (puzzleId: string, photo: string) => void;
 
-    uploader.onPhoto?.(original.id, PHOTO);
+    onPhoto(original.id, PHOTO);
     expect(attachPhoto).toHaveBeenCalledWith(original.id, PHOTO);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/puzzle");
     expect(JSON.parse(String(init.body))).toEqual(copy);
 
-    // A photo for the puzzle itself is the uploader's to save.
+    // A photo for the puzzle itself is keepPuzzle's to save.
     attachPhoto.mockReturnValue({ ...copy });
-    uploader.onPhoto?.(copy.id, PHOTO);
+    onPhoto(copy.id, PHOTO);
     await Promise.resolve();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
@@ -206,6 +260,18 @@ describe("Room", () => {
     expect({ ...opened, createdAt: 0 }).toEqual({ ...linked, createdAt: 0 });
     expect(opened.createdAt).toBeGreaterThan(2_000);
     expect(letters).toEqual(saved);
+    expect(screen.queryByRole("button", { name: "Öppna länkens korsord" })).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("hides the offer to open the linked puzzle while a new photo's squares are checked", async () => {
+    const linked = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c", createdAt: 1_000 });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.endsWith("/letters") ? Response.json({}, { status: 404 }) : Response.json(linked))));
+    room.current = roomState({ board: { puzzle: makePuzzle({ id: "today", createdAt: 2_000 }), letters: {}, authors: {} } });
+    render(<Room nickname="Nova" linkedPuzzleId={linked.id} onLeave={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Öppna länkens korsord" })).toBeTruthy());
+
+    act(() => uploader.onRead?.({ puzzle: makePuzzle({ id: "next" }), file: new File(["x"], "kryss.jpg") }));
     expect(screen.queryByRole("button", { name: "Öppna länkens korsord" })).toBeNull();
     vi.unstubAllGlobals();
   });
