@@ -14,9 +14,13 @@ const STORE_TIMEOUT_MS = 60_000;
 
 type Upload = Omit<Awaited<ReturnType<typeof prepareImages>>, "pixels">;
 
+/** A photo read into a puzzle that isn't shared yet, with the photo to store once it is. */
+export type Draft = { puzzle: CrosswordPuzzle; file: File };
+
 /**
  * Reads the grid from the photo's pixels in the browser, and asks Gemini only
- * when that finds no usable grid. Returns a puzzle ready to share.
+ * when that finds no usable grid. Returns a draft puzzle for the player to
+ * check (CellEditor), which dates it again when it is shared.
  */
 export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
   const { cells, upload } = await prepare(file);
@@ -130,7 +134,7 @@ export async function savePuzzle(puzzle: CrosswordPuzzle): Promise<boolean> {
  * shows the link at once, then stores the photo and saves the puzzle again
  * with its id (the only change a second save may make).
  */
-async function keepPuzzle(puzzle: CrosswordPuzzle, file: File, onPhoto?: (puzzleId: string, photo: string) => void) {
+export async function keepPuzzle(puzzle: CrosswordPuzzle, file: File, onPhoto?: (puzzleId: string, photo: string) => void) {
   const saved = savePuzzle(puzzle);
   const photo = await storePhoto(file);
   if (!photo) return;
@@ -141,13 +145,11 @@ async function keepPuzzle(puzzle: CrosswordPuzzle, file: File, onPhoto?: (puzzle
 
 export function PuzzleUploader({
   compact = false,
-  onPuzzle,
-  onPhoto,
+  onRead,
 }: {
   compact?: boolean;
-  onPuzzle: (puzzle: CrosswordPuzzle) => void;
-  /** The sharp copy of a shared puzzle's photo was stored. */
-  onPhoto?: (puzzleId: string, photo: string) => void;
+  /** A photo was read; sharing it, and keepPuzzle, is up to the caller. */
+  onRead: (draft: Draft) => void;
 }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -161,9 +163,7 @@ export function PuzzleUploader({
     setIsAnalyzing(true);
     setError("");
     try {
-      const puzzle = await analyzeCrossword(file);
-      onPuzzle(puzzle);
-      void keepPuzzle(puzzle, file, onPhoto);
+      onRead({ puzzle: await analyzeCrossword(file), file });
     } catch (failure) {
       if (!(failure instanceof UploadError)) console.error(failure);
       setError(failure instanceof UploadError ? failure.message : "Något gick fel. Försök igen.");

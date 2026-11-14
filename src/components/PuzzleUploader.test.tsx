@@ -9,7 +9,7 @@ vi.mock("@/lib/image", () => ({ prepareImages, prepareStoreCopy }));
 const readGrid = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/gridImage", () => ({ readGrid }));
 
-const { analyzeCrossword, PuzzleUploader, savePuzzle, storePhoto } = await import("./PuzzleUploader");
+const { analyzeCrossword, keepPuzzle, PuzzleUploader, savePuzzle, storePhoto } = await import("./PuzzleUploader");
 
 const file = new File(["x"], "kryss.jpg", { type: "image/jpeg" });
 
@@ -147,72 +147,91 @@ describe("savePuzzle", () => {
   });
 });
 
-describe("PuzzleUploader", () => {
-  afterEach(cleanup);
+describe("keepPuzzle", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
 
-  it("shares and saves the puzzle first, then reports the stored photo and saves it with the puzzle", async () => {
-    readGrid.mockReturnValue(gridCells(2, 5));
-    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+  it("saves the puzzle first, then reports the stored photo and saves it with the puzzle", async () => {
+    const puzzle = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
     let finishUpload: (response: Response) => void = () => {};
     const fetchMock = vi.fn((url: string) =>
       url === "/api/photo" ? new Promise<Response>((resolve) => (finishUpload = resolve)) : Promise.resolve(Response.json({ id: "x" })),
     );
     vi.stubGlobal("fetch", fetchMock);
     prepareStoreCopy.mockResolvedValue(storeBlob);
-    const onPuzzle = vi.fn();
     const onPhoto = vi.fn();
-    render(<PuzzleUploader onPuzzle={onPuzzle} onPhoto={onPhoto} />);
 
-    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
+    const kept = keepPuzzle(puzzle, file, onPhoto);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const shared = onPuzzle.mock.calls[0][0];
-    expect(shared.photo).toBeUndefined();
     const saves = () =>
       (fetchMock.mock.calls as unknown as [string, RequestInit][]).filter(([url]) => url === "/api/puzzle").map(([, init]) => JSON.parse(String(init.body)));
-    expect(saves()).toEqual([shared]);
+    expect(saves()).toEqual([puzzle]);
     expect(onPhoto).not.toHaveBeenCalled();
 
     finishUpload(Response.json({ id: PHOTO_ID }));
-    await waitFor(() => expect(onPhoto).toHaveBeenCalledWith(shared.id, PHOTO_ID));
-    await waitFor(() => expect(saves()).toEqual([shared, { ...shared, photo: PHOTO_ID }]));
+    await kept;
+    expect(onPhoto).toHaveBeenCalledWith(puzzle.id, PHOTO_ID);
+    expect(saves()).toEqual([puzzle, { ...puzzle, photo: PHOTO_ID }]);
   });
 
   it("saves the puzzle once, without a photo, when storing the photo fails", async () => {
-    readGrid.mockReturnValue(gridCells(2, 5));
-    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    const puzzle = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
     prepareStoreCopy.mockResolvedValue(null);
     const fetchMock = vi.fn(async () => Response.json({ id: "x" }));
     vi.stubGlobal("fetch", fetchMock);
-    const onPuzzle = vi.fn();
-    render(<PuzzleUploader onPuzzle={onPuzzle} onPhoto={vi.fn()} />);
-    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
-    await waitFor(() => expect(prepareStoreCopy).toHaveBeenCalled());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const onPhoto = vi.fn();
+    await keepPuzzle(puzzle, file, onPhoto);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/puzzle");
-    expect(JSON.parse(String(init.body))).toEqual(onPuzzle.mock.calls[0][0]);
+    expect(JSON.parse(String(init.body))).toEqual(puzzle);
+    expect(onPhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe("PuzzleUploader", () => {
+  afterEach(cleanup);
+
+  it("hands over the read puzzle and its photo, without sharing or storing anything yet", async () => {
+    readGrid.mockReturnValue(gridCells(2, 5));
+    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    prepareStoreCopy.mockReset();
+    const onRead = vi.fn();
+    render(<PuzzleUploader onRead={onRead} />);
+
+    fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
+    await waitFor(() => expect(onRead).toHaveBeenCalledTimes(1));
+    const [{ puzzle, file: photo }] = onRead.mock.calls[0];
+    expect(puzzle.cells).toEqual(gridCells(2, 5));
+    expect(puzzle.image).toBe("data:image/jpeg;base64,SMALL");
+    expect(photo).toBe(file);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prepareStoreCopy).not.toHaveBeenCalled();
   });
 
-  it("stores nothing for a photo that couldn't be read", async () => {
+  it("reports a photo that couldn't be read", async () => {
     readGrid.mockReturnValue(null);
     prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Kunde inte tolka bilden." }, { status: 422 })));
-    prepareStoreCopy.mockReset();
-    render(<PuzzleUploader onPuzzle={vi.fn()} onPhoto={vi.fn()} />);
+    const onRead = vi.fn();
+    render(<PuzzleUploader onRead={onRead} />);
 
     fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByText("Kunde inte tolka bilden.")).toBeTruthy());
-    expect(prepareStoreCopy).not.toHaveBeenCalled();
+    expect(onRead).not.toHaveBeenCalled();
   });
 
   it("compact mode offers loading a new puzzle and reports errors inline", async () => {
     prepareImages.mockRejectedValue(new Error("nope"));
-    const onPuzzle = vi.fn();
-    render(<PuzzleUploader compact onPuzzle={onPuzzle} />);
+    const onRead = vi.fn();
+    render(<PuzzleUploader compact onRead={onRead} />);
     expect(screen.getByText("Nytt korsord")).toBeTruthy();
 
     fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByText(/Kunde inte läsa bilden/)).toBeTruthy());
-    expect(onPuzzle).not.toHaveBeenCalled();
+    expect(onRead).not.toHaveBeenCalled();
   });
 });

@@ -9,9 +9,10 @@ import { restartedPuzzle } from "@/lib/storedPuzzle";
 import { Grid3x3, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
+import { CellEditor } from "./CellEditor";
 import { CrosswordGrid, focusCell } from "./CrosswordGrid";
 import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
-import { PuzzleUploader, savePuzzle } from "./PuzzleUploader";
+import { keepPuzzle, PuzzleUploader, savePuzzle, type Draft } from "./PuzzleUploader";
 
 export function Room({
   nickname,
@@ -25,6 +26,8 @@ export function Room({
 }) {
   const room = useCrosswordRoom(nickname);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
+  // A photo this player read, while they check its squares before sharing it.
+  const [draft, setDraft] = useState<Draft | null>(null);
   const { puzzle, letters, authors } = room.board;
   const link = useLinkedPuzzle(linkedPuzzleId, puzzle?.id, room.restorePuzzle);
   // Everyone in the room gets a colour as soon as presence lists them, from
@@ -58,6 +61,13 @@ export function Room({
     selectFirst(next);
   }
 
+  function shareDraft(next: CrosswordPuzzle) {
+    if (!draft) return;
+    setDraft(null);
+    onPuzzle(next);
+    void keepPuzzle(next, draft.file, onPhoto);
+  }
+
   function openLinked() {
     const opened = link.open();
     if (opened) selectFirst(opened);
@@ -65,7 +75,7 @@ export function Room({
 
   function onPhoto(puzzleId: string, photo: string) {
     const updated = room.attachPhoto(puzzleId, photo);
-    // The uploader saves only the puzzle it uploaded; a copy started over before the photo was stored needs it too.
+    // keepPuzzle saves only the puzzle it was given; a copy started over before the photo was stored needs it too.
     if (updated && updated.id !== puzzleId) void savePuzzle(updated);
   }
 
@@ -101,7 +111,8 @@ export function Room({
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
-          {puzzle ? (
+          {/* Hidden while a photo is being checked: the puzzle it would start over is out of sight. */}
+          {puzzle && !draft ? (
             <button
               type="button"
               onClick={restart}
@@ -113,7 +124,7 @@ export function Room({
               <span className="hidden sm:inline">Börja om</span>
             </button>
           ) : null}
-          {puzzle ? <PuzzleUploader compact onPuzzle={onPuzzle} onPhoto={onPhoto} /> : null}
+          {puzzle || draft ? <PuzzleUploader compact onRead={setDraft} /> : null}
           <button
             type="button"
             onClick={onLeave}
@@ -127,7 +138,7 @@ export function Room({
       {link.error ? (
         <p className="shrink-0 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">{link.error}</p>
       ) : null}
-      {link.elsewhere ? (
+      {link.elsewhere && !draft ? (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">
           <p>Rummet har ett annat korsord än det i länken.</p>
           <button
@@ -152,7 +163,10 @@ export function Room({
         } lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-1`}
       >
         <section className="flex min-h-0 items-stretch justify-center overflow-hidden p-2 sm:p-4">
-          {puzzle ? (
+          {draft ? (
+            // Keyed by puzzle, so a new photo starts over with its own squares.
+            <CellEditor key={draft.puzzle.id} puzzle={draft.puzzle} onDone={shareDraft} onCancel={() => setDraft(null)} />
+          ) : puzzle ? (
             <div className="flex min-h-0 w-full flex-col gap-2">
               <PlayerLegend colours={colours} />
               <div className="min-h-0 flex-1">
@@ -168,7 +182,7 @@ export function Room({
               </div>
             </div>
           ) : (
-            <PuzzleUploader onPuzzle={onPuzzle} onPhoto={onPhoto} />
+            <PuzzleUploader onRead={setDraft} />
           )}
         </section>
 
