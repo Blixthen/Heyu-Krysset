@@ -232,6 +232,74 @@ describe("Room", () => {
     expect(toggle().textContent).toContain("2 nya");
   });
 
+  it("shows only the crossword until the default view is asked for again, keeping a half-written message", () => {
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} } });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Livechatt/ }));
+    fireEvent.change(screen.getByLabelText("Meddelande"), { target: { value: "halvklart" } });
+    const header = screen.getByText("Heyus Fredagskryss").closest("header");
+    const chat = screen.getByRole("button", { name: /Livechatt/ }).closest(".contents, .hidden");
+    expect(header?.classList.contains("hidden")).toBe(false);
+    expect(chat?.classList.contains("hidden")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa bara korsordet" }));
+    expect(header?.classList.contains("hidden")).toBe(true);
+    expect(chat?.classList.contains("hidden")).toBe(true);
+    expect(screen.getByLabelText("Rad 1, ruta 1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa allt" }));
+    expect(header?.classList.contains("hidden")).toBe(false);
+    expect(chat?.classList.contains("hidden")).toBe(false);
+    expect((screen.getByLabelText("Meddelande") as HTMLInputElement).value).toBe("halvklart");
+  });
+
+  it("keeps notices and errors in sight while only the crossword shows", () => {
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} }, shareError: "Korsordet kunde inte delas med de andra." });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Visa bara korsordet" }));
+    expect(screen.getByText("Korsordet kunde inte delas med de andra.").className).not.toContain("hidden");
+  });
+
+  it("shows a lost connection and a way to reconnect while the chat is hidden", () => {
+    const reconnect = vi.fn();
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} }, status: "error", reconnect });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Visa bara korsordet" }));
+    expect(screen.getAllByText("Ingen kontakt").some((badge) => !badge.closest(".hidden"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    expect(reconnect).toHaveBeenCalledOnce();
+  });
+
+  it("counts new messages on the way back while only the crossword shows, even with the chat open", () => {
+    const message = (id: string) => ({ id, senderId: "peer", nickname: "Kim", text: id, sentAt: "" });
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} }, messages: [message("m1")] });
+    const { rerender } = render(<Room nickname="Nova" onLeave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Livechatt/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Visa bara korsordet" }));
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} }, messages: [message("m1"), message("m2")] });
+    rerender(<Room nickname="Nova" onLeave={() => {}} />);
+    expect(screen.getByRole("button", { name: "Visa allt, 2 nya meddelanden" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Visa allt/ }));
+    expect(screen.getByRole("button", { name: /Livechatt/ }).textContent).not.toContain("nya");
+  });
+
+  it("doesn't go back to only the crossword by itself after a new photo is checked", () => {
+    room.current = roomState({ board: { puzzle: makePuzzle(), letters: {}, authors: {} } });
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Visa bara korsordet" }));
+    act(() => uploader.onRead?.({ puzzle: makePuzzle({ id: "next" }), file: new File(["x"], "kryss.jpg") }));
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(screen.getByText("Heyus Fredagskryss").closest("header")?.classList.contains("hidden")).toBe(false);
+    expect(screen.getByRole("button", { name: "Visa bara korsordet" })).toBeTruthy();
+  });
+
+  it("offers no crossword-only view without a crossword", () => {
+    room.current = roomState();
+    render(<Room nickname="Nova" onLeave={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Visa bara korsordet" })).toBeNull();
+  });
+
   it("shows the banner photo behind the header, still when less motion is asked for", () => {
     room.current = roomState();
     render(<Room nickname="Nova" onLeave={() => {}} />);
