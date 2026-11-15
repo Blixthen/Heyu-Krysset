@@ -110,8 +110,8 @@ async function askGemini(images: Upload): Promise<LetterCell[]> {
 }
 
 /**
- * Saves the puzzle behind its permanent link. Best effort: the room works
- * without it, only the link won't open the puzzle once everyone has left.
+ * Saves the puzzle behind its permanent link, which is how everyone else
+ * opens it. Never throws; false if it failed.
  */
 export async function savePuzzle(puzzle: CrosswordPuzzle): Promise<boolean> {
   try {
@@ -130,17 +130,25 @@ export async function savePuzzle(puzzle: CrosswordPuzzle): Promise<boolean> {
 }
 
 /**
- * Saves a shared puzzle behind its link straight away, since the address bar
- * shows the link at once, then stores the photo and saves the puzzle again
- * with its id (the only change a second save may make).
+ * Saves a shared puzzle behind its link straight away, since that is how the
+ * others open it, then stores the photo and saves the puzzle again with its
+ * id (the only change a second save may make). `onSaved` hears how the first
+ * save went, and again if it failed but the second one stored the puzzle.
  */
-export async function keepPuzzle(puzzle: CrosswordPuzzle, file: File, onPhoto?: (puzzleId: string, photo: string) => void) {
+export async function keepPuzzle(
+  puzzle: CrosswordPuzzle,
+  file: File,
+  onPhoto?: (puzzleId: string, photo: string) => void,
+  onSaved?: (ok: boolean) => void,
+) {
   const saved = savePuzzle(puzzle);
+  void saved.then((ok) => onSaved?.(ok));
   const photo = await storePhoto(file);
   if (!photo) return;
   onPhoto?.(puzzle.id, photo);
-  await saved;
-  await savePuzzle({ ...puzzle, photo });
+  const first = await saved;
+  const second = await savePuzzle({ ...puzzle, photo });
+  if (!first && second) onSaved?.(true);
 }
 
 export function PuzzleUploader({

@@ -5,31 +5,61 @@ import { useLinkedPuzzle } from "@/hooks/useLinkedPuzzle";
 import { countUnread } from "@/lib/chat";
 import type { CellPosition, CrosswordPuzzle } from "@/lib/crossword";
 import { playerColours } from "@/lib/players";
+import type { SavedLetters } from "@/lib/storedLetters";
 import { restartedPuzzle } from "@/lib/storedPuzzle";
-import { Grid3x3, Maximize2, Minimize2, RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { roomOf } from "@/lib/room";
+import { Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppHeader } from "./AppHeader";
 import { ChatPanel, StatusBadge } from "./ChatPanel";
 import { CellEditor } from "./CellEditor";
 import { CrosswordGrid, focusCell } from "./CrosswordGrid";
 import { PLAYER_COLOURS, PlayerLegend } from "./PlayerLegend";
 import { keepPuzzle, PuzzleUploader, savePuzzle, type Draft } from "./PuzzleUploader";
 
+/**
+ * One crossword's room (roomOf), at its permanent link: the puzzle from the
+ * link, or one this player just shared, which opens in a room of its own.
+ */
 export function Room({
   nickname,
   linkedPuzzleId,
+  shared: sharedProp,
+  onSharedTaken,
+  onShare,
+  onHome,
   onLeave,
 }: {
   nickname: string;
-  /** A stored puzzle to open, from a permanent link. */
+  /** The stored puzzle the link opens. */
   linkedPuzzleId?: string;
+  /** A crossword this player just shared, opening its room. */
+  shared?: Draft;
+  /** The room took the crossword just shared; a room mounted later, after a nickname change, opens it by its link. */
+  onSharedTaken?: () => void;
+  /** This player shared a new crossword from here; it gets a room of its own. */
+  onShare: (shared: Draft) => void;
+  onHome: () => void;
   onLeave: () => void;
 }) {
-  const room = useCrosswordRoom(nickname);
+  // Kept from the first render: the room is this crossword's however the prop changes.
+  const [shared] = useState(sharedProp);
+  const [linkedRoom, setLinkedRoom] = useState<string | null>(null);
+  const room = useCrosswordRoom(nickname, shared ? roomOf(shared.puzzle) : linkedRoom);
   const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
   // A photo this player read, while they check its squares before sharing it.
   const [draft, setDraft] = useState<Draft | null>(null);
   const { puzzle, letters, authors } = room.board;
-  const link = useLinkedPuzzle(linkedPuzzleId, puzzle?.id, room.restorePuzzle);
+  const { restorePuzzle } = room;
+  const openStored = useCallback(
+    (stored: CrosswordPuzzle, saved?: SavedLetters) => {
+      // The room is the stored puzzle's, known once it loads.
+      setLinkedRoom(roomOf(stored));
+      restorePuzzle(stored, saved);
+    },
+    [restorePuzzle],
+  );
+  const link = useLinkedPuzzle(shared ? undefined : linkedPuzzleId, puzzle?.id, openStored);
   // Everyone in the room gets a colour as soon as presence lists them, from
   // the same names in every tab; typists keep theirs whoever comes and goes.
   const { online } = room;
@@ -79,8 +109,8 @@ export function Room({
   function shareDraft(next: CrosswordPuzzle) {
     if (!draft) return;
     setDraft(null);
-    onPuzzle(next);
-    void keepPuzzle(next, draft.file, onPhoto);
+    // A new crossword gets a room of its own; this one keeps its puzzle.
+    onShare({ puzzle: next, file: draft.file });
   }
 
   function openLinked() {
@@ -88,11 +118,37 @@ export function Room({
     if (opened) selectFirst(opened);
   }
 
+  // The photo stored for the crossword just shared, for saving its link again.
+  const sharedPhoto = useRef<string | undefined>(undefined);
+
   function onPhoto(puzzleId: string, photo: string) {
+    if (puzzleId === shared?.puzzle.id) sharedPhoto.current = photo;
     const updated = room.attachPhoto(puzzleId, photo);
     // keepPuzzle saves only the puzzle it was given; a copy started over before the photo was stored needs it too.
     if (updated && updated.id !== puzzleId) void savePuzzle(updated);
   }
+
+  // A crossword just shared fills its new room, once, and is stored for its link.
+  const opened = useRef(false);
+  // Whether the link of the crossword just shared failed to save, so nobody else can open it.
+  const [unsaved, setUnsaved] = useState(false);
+  useEffect(() => {
+    if (!shared || opened.current) return;
+    opened.current = true;
+    onPuzzle(shared.puzzle);
+    void keepPuzzle(shared.puzzle, shared.file, onPhoto, (ok) => setUnsaved(!ok));
+    onSharedTaken?.();
+  });
+
+  async function saveAgain() {
+    // The crossword shared, whose link the others were given, even if it was started over since.
+    if (!shared) return;
+    const photo = sharedPhoto.current;
+    setUnsaved(!(await savePuzzle(photo ? { ...shared.puzzle, photo } : shared.puzzle)));
+  }
+
+  // A link that can't open has no room to join, so there is no chat to show either.
+  const noRoom = !puzzle && Boolean(link.error);
 
   function restart() {
     if (!puzzle || !window.confirm("Börja om korsordet? Alla bokstäver försvinner, för alla i rummet.")) return;
@@ -104,52 +160,30 @@ export function Room({
 
   return (
     <main className="flex h-dvh max-h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
-      {/* Phones have no room beside the title and buttons, so the photo gets its own row above them. */}
-      <header className={`${shownBesideGrid("grid")} shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-5`}>
-        {/* Decoration only. The still frame stands in when the user asks for less motion. */}
-        <picture className="col-span-2 justify-self-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
-          <source media="(prefers-reduced-motion: reduce)" srcSet="/banner-still.webp" />
-          {/* Square crop of a portrait photo; 30% from the top keeps the whole face in. */}
-          <img
-            src="/banner.webp"
-            alt=""
-            className="size-24 rounded-2xl object-cover object-[50%_30%] sm:size-28 lg:size-32"
-          />
-        </picture>
-        <div className="flex min-w-0 items-center gap-3 sm:row-start-1">
-          {/* Phones need the room for the buttons beside the title. */}
-          <span className="hidden size-10 shrink-0 items-center justify-center rounded-2xl bg-sky-400/15 text-sky-300 sm:flex">
-            <Grid3x3 className="size-5" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-slate-50">Heyus Fredagskryss</p>
-            <p className="truncate text-xs text-slate-400">Inloggad som {nickname}</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
-          {/* Hidden while a photo is being checked: the puzzle it would start over is out of sight. */}
-          {puzzle && !draft ? (
-            <button
-              type="button"
-              onClick={restart}
-              aria-label="Börja om"
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
-            >
-              <RotateCcw className="size-3.5" />
-              {/* Phones only fit the icon beside the other buttons. */}
-              <span className="hidden sm:inline">Börja om</span>
-            </button>
-          ) : null}
-          {puzzle || draft ? <PuzzleUploader compact onRead={startDraft} /> : null}
-          <button
-            type="button"
-            onClick={onLeave}
-            className="min-h-9 shrink-0 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
-          >
-            Byt namn
-          </button>
-        </div>
-      </header>
+      <AppHeader
+        nickname={nickname}
+        onHome={onHome}
+        onLeave={onLeave}
+        className={shownBesideGrid("grid")}
+        actions={
+          <>
+            {/* Hidden while a photo is being checked: the puzzle it would start over is out of sight. */}
+            {puzzle && !draft ? (
+              <button
+                type="button"
+                onClick={restart}
+                aria-label="Börja om"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-slate-700 px-3 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white"
+              >
+                <RotateCcw className="size-3.5" />
+                {/* Phones only fit the icon beside the other buttons. */}
+                <span className="hidden sm:inline">Börja om</span>
+              </button>
+            ) : null}
+            <PuzzleUploader compact onRead={startDraft} />
+          </>
+        }
+      />
 
       {link.error ? (
         <p className="shrink-0 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">{link.error}</p>
@@ -166,6 +200,14 @@ export function Room({
           </button>
           <button type="button" onClick={link.dismiss} className="text-slate-400 hover:text-white">
             Stäng
+          </button>
+        </div>
+      ) : null}
+      {unsaved ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-800 px-4 py-2 text-xs text-amber-300">
+          <p>Korsordet kunde inte sparas, så ingen annan kan öppna det än.</p>
+          <button type="button" onClick={() => void saveAgain()} className="font-bold text-amber-200 underline underline-offset-2 hover:text-white">
+            Försök igen
           </button>
         </div>
       ) : null}
@@ -229,11 +271,18 @@ export function Room({
               />
             </div>
           ) : (
-            <PuzzleUploader onRead={startDraft} />
+            <div className="flex flex-col items-center justify-center gap-3 text-center text-sm text-slate-400">
+              <p>{link.error || "Hämtar korsordet…"}</p>
+              {link.error ? (
+                <button type="button" onClick={onHome} className="font-semibold text-sky-300 underline underline-offset-2 hover:text-white">
+                  Till alla korsord
+                </button>
+              ) : null}
+            </div>
           )}
         </section>
 
-        <div className={shownBesideGrid("contents")}>
+        <div className={noRoom ? "hidden" : shownBesideGrid("contents")}>
           <ChatPanel
             clientId={room.clientId}
             status={room.status}

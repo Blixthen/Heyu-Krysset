@@ -1,8 +1,9 @@
 # Heyus Fredagskryss
 
 Solve a crossword together in real time. One person photographs the puzzle,
-the app finds the letter squares, and everyone in the room types into the same
-grid and chats alongside it.
+the app finds the letter squares, and everyone who opens its link types into
+the same grid and chats alongside it. Each crossword has a room of its own;
+the start page lists the past week's.
 
 ## Getting started
 
@@ -61,8 +62,10 @@ use `pnpm preview`.
 - **Password gate**: `src/proxy.ts` blocks everything except `/login` and
   `/api/unlock` until the visitor has the `heyu_gate` cookie, an HMAC of
   `APP_PASSWORD`.
-- **Room**: clients fetch the realtime channel name from `/api/room` (behind
-  the gate), so the public Supabase anon key alone is not enough to join.
+- **Rooms**: clients fetch a secret topic from `/api/room` (behind the gate),
+  so the public Supabase anon key alone is not enough to join, and add the
+  crossword's id to it (`src/lib/room.ts`): each crossword is its own room,
+  with its own chat. Starting a crossword over stays in its room.
 - **Analysis**: the browser reads the letter squares from the photo's pixels
   (`src/lib/gridImage.ts`). If it finds no grid, `/api/analyze-crossword`
   sends the photo to Gemini and returns validated letter cells
@@ -71,19 +74,20 @@ use `pnpm preview`.
   (behind the gate), which stores it in the R2 bucket; the puzzle carries only
   its id, plus a small inline copy.
 - **Links**: the uploader also saves the puzzle to `/api/puzzle`, and
-  `/p/<id>` opens it again, even after everyone has left. The address bar
-  shows the current puzzle's link.
+  `/p/<id>` opens its room, even after everyone has left. The address bar
+  shows the current puzzle's link. `/api/puzzles` lists the recent ones for
+  the start page, from metadata stored beside each puzzle.
 - **Sync**: peers exchange chat messages, letters and the puzzle over Supabase
   Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). Apart from photos,
   nothing is stored on a server; when a client joins it asks the room for the
-  current puzzle. The
-  newest puzzle wins and letters are merged (`src/lib/board.ts`). Every
-  payload from a peer is validated before use.
+  current puzzle. Within a room the newest puzzle wins (a crossword started
+  over) and letters are merged (`src/lib/board.ts`). Every payload from a peer
+  is validated before use.
 
 ### Known limitations
 
 - State lives only in connected browsers; when everyone leaves, the puzzle and
   chat are gone. A puzzle's link brings back the puzzle, but not the letters,
   until it expires.
-- Anyone with the password is trusted: they can replace the puzzle or use any
-  nickname.
+- Anyone with the password is trusted: they can open any crossword, start it
+  over, or use any nickname.

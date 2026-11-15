@@ -26,6 +26,7 @@ const { SAVE_DELAY_MS } = await import("./useLetterSaving");
 const { hasReacted } = await import("@/lib/reactions");
 
 const TOPIC = "crossword-secret";
+const ROOM = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
 
 function mockRoomResponse(response: () => Response) {
   const fetchMock = vi.fn(async () => response());
@@ -41,7 +42,7 @@ async function flush(ms = 0) {
 
 /** Renders the hook and waits until it has created a channel. */
 async function connect() {
-  const hook = renderHook(() => useCrosswordRoom("Nova"));
+  const hook = renderHook(() => useCrosswordRoom("Nova", ROOM));
   await flush();
   return { ...hook, channel: () => fake.client!.latest! };
 }
@@ -79,8 +80,21 @@ describe("useCrosswordRoom", () => {
     it("joins the topic handed out by /api/room, not a guessable name", async () => {
       const room = await connect();
       expect(fetch).toHaveBeenCalledWith("/api/room", { cache: "no-store" });
-      expect(room.channel().topic).toBe(`realtime:${TOPIC}`);
+      expect(room.channel().topic).toBe(`realtime:${TOPIC}:${ROOM}`);
       expect(room.result.current.status).toBe("connecting");
+    });
+
+    it("gives each crossword's room a channel of its own", async () => {
+      renderHook(() => useCrosswordRoom("Nova", "other-room"));
+      await flush();
+      expect(fake.client!.latest!.topic).toBe(`realtime:${TOPIC}:other-room`);
+    });
+
+    it("connects to nothing until the crossword's room is known", async () => {
+      renderHook(() => useCrosswordRoom("Nova", null));
+      await flush();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(fake.client!.latest).toBeUndefined();
     });
 
     it("goes live and asks peers for the current puzzle", async () => {
@@ -133,9 +147,9 @@ describe("useCrosswordRoom", () => {
 
     it("gives up instead of spinning when the old channel will not close", async () => {
       fake.client!.removeChannel = async () => "ok"; // never actually removes
-      const stuck = fake.client!.channel(TOPIC);
+      const stuck = fake.client!.channel(`${TOPIC}:${ROOM}`);
       stuck.state = "joined";
-      const room = renderHook(() => useCrosswordRoom("Nova"));
+      const room = renderHook(() => useCrosswordRoom("Nova", ROOM));
       await flush(60_000);
       expect(room.result.current.status).toBe("error");
     });
@@ -150,7 +164,7 @@ describe("useCrosswordRoom", () => {
     it("reports a secret Supabase key without connecting", async () => {
       config.secret = true;
       config.configured = false;
-      const room = renderHook(() => useCrosswordRoom("Nova"));
+      const room = renderHook(() => useCrosswordRoom("Nova", ROOM));
       await flush();
       expect(room.result.current.status).toBe("error");
       expect(room.result.current.connectionError).toMatch(/sb_publishable_/);
@@ -159,7 +173,7 @@ describe("useCrosswordRoom", () => {
 
     it("reports missing configuration", async () => {
       config.configured = false;
-      const room = renderHook(() => useCrosswordRoom("Nova"));
+      const room = renderHook(() => useCrosswordRoom("Nova", ROOM));
       expect(room.result.current.status).toBe("unconfigured");
     });
   });
@@ -304,7 +318,7 @@ describe("useCrosswordRoom", () => {
     });
 
     it("does not announce a nickname peers would reject", async () => {
-      const hook = renderHook(() => useCrosswordRoom(" Nova"));
+      const hook = renderHook(() => useCrosswordRoom(" Nova", ROOM));
       await flush();
       act(() => fake.client!.latest!.status("SUBSCRIBED"));
       await flush();
