@@ -16,6 +16,7 @@ import {
 } from "@/lib/crossword";
 import { isPlayerName, onlineNames, sameNames } from "@/lib/players";
 import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
+import { roomChannel } from "@/lib/room";
 import type { SavedLetters } from "@/lib/storedLetters";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
@@ -64,7 +65,11 @@ async function removeChannels(client: SupabaseClient, channels: RealtimeChannel[
   ]);
 }
 
-export function useCrosswordRoom(nickname: string) {
+/**
+ * One crossword's room (roomOf): its chat, letters and players. `room` is
+ * null until the crossword is known, and nothing connects before then.
+ */
+export function useCrosswordRoom(nickname: string, room: string | null) {
   const [clientId] = useState(() => crypto.randomUUID());
   const [status, setStatus] = useState<"connecting" | "live" | "error">("connecting");
   const [connectionError, setConnectionError] = useState("");
@@ -108,7 +113,7 @@ export function useCrosswordRoom(nickname: string) {
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !isSupabaseConfigured) return;
+    if (!client || !isSupabaseConfigured || !room) return;
 
     let cancelled = false;
     let attempt = 0;
@@ -135,7 +140,7 @@ export function useCrosswordRoom(nickname: string) {
 
     const connect = async () => {
       try {
-        topic ??= await fetchRoomTopic();
+        topic ??= roomChannel(await fetchRoomTopic(), room);
       } catch (error) {
         if (cancelled) return;
         // The gate cookie expired or the password changed.
@@ -262,7 +267,7 @@ export function useCrosswordRoom(nickname: string) {
       channelRef.current = null;
       if (current) void client.removeChannel(current);
     };
-  }, [apply, broadcastPuzzle, clientId, generation]);
+  }, [apply, broadcastPuzzle, clientId, generation, room]);
 
   const reconnect = useCallback(() => {
     setStatus("connecting");

@@ -10,6 +10,7 @@ interface PhotoBucketObject {
 
 interface PhotoBucketPutOptions {
   httpMetadata?: { contentType?: string };
+  customMetadata?: Record<string, string>;
   /** Write only if this holds; put then resolves to null instead of writing. */
   onlyIf?: { etagDoesNotMatch?: string; etagMatches?: string };
 }
@@ -19,6 +20,14 @@ interface PhotoBucket {
   get(key: string): Promise<PhotoBucketObject | null>;
   /** The object's metadata without its body, or null if there is none. */
   head(key: string): Promise<object | null>;
+  /** One page of the objects under a prefix, in key order. */
+  list(options: { prefix: string; cursor?: string; include?: "customMetadata"[] }): Promise<PhotoBucketListing>;
+}
+
+interface PhotoBucketListing {
+  objects: { key: string; uploaded: Date; customMetadata?: Record<string, string> }[];
+  truncated: boolean;
+  cursor?: string;
 }
 
 declare global {

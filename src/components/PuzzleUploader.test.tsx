@@ -175,6 +175,30 @@ describe("keepPuzzle", () => {
     expect(saves()).toEqual([puzzle, { ...puzzle, photo: PHOTO_ID }]);
   });
 
+  it("reports a failed first save, and then the second one if it stored the puzzle after all", async () => {
+    const puzzle = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
+    let saves = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/api/photo" ? Response.json({ id: PHOTO_ID }) : (saves += 1) === 1 ? new Response(null, { status: 502 }) : Response.json({ id: puzzle.id }),
+      ),
+    );
+    prepareStoreCopy.mockResolvedValue(storeBlob);
+    const onSaved = vi.fn();
+    await keepPuzzle(puzzle, file, undefined, onSaved);
+    expect(onSaved.mock.calls).toEqual([[false], [true]]);
+  });
+
+  it("reports a first save that worked only once", async () => {
+    const puzzle = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json({ id: url === "/api/photo" ? PHOTO_ID : puzzle.id })));
+    prepareStoreCopy.mockResolvedValue(storeBlob);
+    const onSaved = vi.fn();
+    await keepPuzzle(puzzle, file, undefined, onSaved);
+    expect(onSaved.mock.calls).toEqual([[true]]);
+  });
+
   it("saves the puzzle once, without a photo, when storing the photo fails", async () => {
     const puzzle = makePuzzle({ id: "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c" });
     prepareStoreCopy.mockResolvedValue(null);

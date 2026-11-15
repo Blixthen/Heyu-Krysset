@@ -1,6 +1,7 @@
 import type { Result } from "./analyze";
-import { isCrosswordPuzzle, toCrosswordPuzzle, type CrosswordPuzzle } from "./crossword";
+import { isCrosswordPuzzle, MAX_CELLS, toCrosswordPuzzle, type CrosswordPuzzle } from "./crossword";
 import { isRandomId } from "./photo";
+import { roomOf } from "./room";
 
 /**
  * Stored puzzles, behind a permanent link. The uploader saves the puzzle
@@ -30,6 +31,91 @@ export function puzzleKey(id: string) {
   return `puzzles/${id}.json`;
 }
 
+/** Where the browser lists the recent puzzles from. */
+export const RECENT_PUZZLES_URL = "/api/puzzles";
+
+/** The bucket prefix of stored puzzles. */
+export const PUZZLE_PREFIX = "puzzles/";
+
+/** The most rooms the list of recent puzzles shows; puzzles expire after a week anyway. */
+export const MAX_RECENT_PUZZLES = 30;
+
+/**
+ * What the list of recent puzzles shows, stored as R2 custom metadata beside
+ * each puzzle, so listing reads no puzzle: parsing each one's inline image
+ * would not fit the Worker's CPU budget. R2 metadata values are strings.
+ */
+export function puzzleMetadata(puzzle: CrosswordPuzzle): Record<string, string> {
+  return {
+    createdAt: String(puzzle.createdAt),
+    cells: String(puzzle.cells.length),
+    ...(puzzle.restartOf === undefined ? {} : { restartOf: puzzle.restartOf }),
+  };
+}
+
+/** One room in the list of recent puzzles, by its newest puzzle. */
+export type RecentPuzzle = {
+  /** The newest puzzle in the room, which its link opens. */
+  id: string;
+  room: string;
+  createdAt: number;
+  /** How many letter squares; unknown for puzzles stored before the list. */
+  cells?: number;
+};
+
+/** An object from listing the bucket. */
+export type ListedObject = { key: string; uploaded: Date; customMetadata?: Record<string, string> };
+
+function listedPuzzle(object: ListedObject): RecentPuzzle | null {
+  if (!object.key.startsWith(PUZZLE_PREFIX) || !object.key.endsWith(".json")) return null;
+  const id = object.key.slice(PUZZLE_PREFIX.length, -".json".length);
+  if (!isRandomId(id)) return null;
+  const metadata = object.customMetadata ?? {};
+  const restartOf = isRandomId(metadata.restartOf) ? metadata.restartOf : undefined;
+  // Puzzles stored before the list have no metadata; when they were stored stands in for when they were shared.
+  const shared = Number(metadata.createdAt);
+  const createdAt = Number.isSafeInteger(shared) && shared > 0 ? shared : object.uploaded.getTime();
+  const cells = Number(metadata.cells);
+  return {
+    id,
+    room: roomOf({ id, restartOf }),
+    createdAt,
+    ...(Number.isInteger(cells) && cells > 0 && cells <= MAX_CELLS ? { cells } : {}),
+  };
+}
+
+/** The rooms of the listed puzzles, each by its newest puzzle, newest first. */
+export function recentPuzzles(objects: ListedObject[]): RecentPuzzle[] {
+  const newest = new Map<string, RecentPuzzle>();
+  for (const object of objects) {
+    const puzzle = listedPuzzle(object);
+    if (!puzzle) continue;
+    const kept = newest.get(puzzle.room);
+    if (!kept || puzzle.createdAt > kept.createdAt) newest.set(puzzle.room, puzzle);
+  }
+  return [...newest.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_RECENT_PUZZLES);
+}
+
+function isRecentPuzzle(value: unknown): value is RecentPuzzle {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    isRandomId(candidate.id) &&
+    isRandomId(candidate.room) &&
+    typeof candidate.createdAt === "number" &&
+    Number.isFinite(candidate.createdAt) &&
+    (candidate.cells === undefined ||
+      (Number.isInteger(candidate.cells) && (candidate.cells as number) > 0 && (candidate.cells as number) <= MAX_CELLS))
+  );
+}
+
+/** The list /api/puzzles answered with, copied field by field; null if it isn't one. */
+export function toRecentPuzzles(value: unknown): RecentPuzzle[] | null {
+  const list = (value as { puzzles?: unknown } | null)?.puzzles;
+  if (!Array.isArray(list) || list.length > MAX_RECENT_PUZZLES || !list.every(isRecentPuzzle)) return null;
+  return list.map(({ id, room, createdAt, cells }) => ({ id, room, createdAt, ...(cells === undefined ? {} : { cells }) }));
+}
+
 const NOT_A_PUZZLE = { message: "Korsordet kunde inte sparas.", status: 400 };
 
 /** Checks a puzzle to store: valid, with a random id so its link can't be guessed or collide. */
@@ -52,14 +138,20 @@ export function compareStored(stored: CrosswordPuzzle, incoming: CrosswordPuzzle
   return storedPhoto === undefined ? "adds-photo" : "conflict";
 }
 
+/** The puzzle a path's link opens, or undefined for any other path. */
+export function linkedPuzzleId(path: string) {
+  const id = path.startsWith("/p/") ? path.slice(3) : null;
+  return id !== null && isRandomId(id) ? id : undefined;
+}
+
 /**
  * Where to go after logging in: home, or a puzzle link the login interrupted.
  * Only those, so the login form can't be used to send someone elsewhere.
  */
 export function safeNextPath(value: unknown) {
   if (typeof value !== "string") return "/";
-  const id = value.startsWith("/p/") ? value.slice(3) : null;
-  return id !== null && isRandomId(id) ? puzzlePath(id) : "/";
+  const id = linkedPuzzleId(value);
+  return id ? puzzlePath(id) : "/";
 }
 
 /**

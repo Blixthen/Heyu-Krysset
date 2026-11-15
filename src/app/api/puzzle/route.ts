@@ -1,6 +1,6 @@
 import { readBounded } from "@/lib/bytes";
 import type { CrosswordPuzzle } from "@/lib/crossword";
-import { MAX_PUZZLE_BYTES, checkPuzzleUpload, compareStored, puzzleKey } from "@/lib/storedPuzzle";
+import { MAX_PUZZLE_BYTES, checkPuzzleUpload, compareStored, puzzleKey, puzzleMetadata } from "@/lib/storedPuzzle";
 import { NextResponse } from "next/server";
 import { storageBucket } from "../storage";
 
@@ -49,7 +49,9 @@ export async function POST(request: Request) {
   const key = puzzleKey(puzzle.id);
 
   try {
-    if (await bucket.put(key, encode(puzzle), { httpMetadata: JSON_METADATA, onlyIf: { etagDoesNotMatch: "*" } })) {
+    // The list of recent puzzles reads this rather than the puzzle.
+    const customMetadata = puzzleMetadata(puzzle);
+    if (await bucket.put(key, encode(puzzle), { httpMetadata: JSON_METADATA, customMetadata, onlyIf: { etagDoesNotMatch: "*" } })) {
       return saved(puzzle.id);
     }
     const existing = await bucket.get(key);
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     if (relation === "same") return saved(puzzle.id);
     if (relation === "conflict") return failure(ALREADY_SAVED, 409);
     // Only if nobody changed it since we read it.
-    const updated = await bucket.put(key, encode(puzzle), { httpMetadata: JSON_METADATA, onlyIf: { etagMatches: existing.etag } });
+    const updated = await bucket.put(key, encode(puzzle), { httpMetadata: JSON_METADATA, customMetadata, onlyIf: { etagMatches: existing.etag } });
     return updated ? saved(puzzle.id) : failure(ALREADY_SAVED, 409);
   } catch (error) {
     console.error("puzzle: storing failed", error);

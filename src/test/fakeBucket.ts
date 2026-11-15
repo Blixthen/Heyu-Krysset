@@ -1,6 +1,9 @@
 import { vi } from "vitest";
 
-type Stored = { bytes: Uint8Array; contentType?: string; etag: string };
+type Stored = { bytes: Uint8Array; contentType?: string; customMetadata?: Record<string, string>; etag: string; uploaded: Date };
+
+/** Objects per page when listing, small so tests reach a second page. */
+export const FAKE_LIST_PAGE = 2;
 
 /** An in-memory stand-in for the R2 bucket bound as PHOTOS, with R2's conditional writes. */
 export function createFakeBucket() {
@@ -9,20 +12,30 @@ export function createFakeBucket() {
   return {
     objects,
     /** Stores an object directly, as if written earlier. */
-    seed(key: string, bytes: Uint8Array) {
-      objects.set(key, { bytes, etag: `v${(version += 1)}` });
+    seed(key: string, bytes: Uint8Array, extra: { customMetadata?: Record<string, string>; uploaded?: Date } = {}) {
+      objects.set(key, { bytes, etag: `v${(version += 1)}`, uploaded: extra.uploaded ?? new Date(version), customMetadata: extra.customMetadata });
     },
     put: vi.fn(
       async (
         key: string,
         value: Uint8Array | ArrayBuffer,
-        options?: { httpMetadata?: { contentType?: string }; onlyIf?: { etagDoesNotMatch?: string; etagMatches?: string } },
+        options?: {
+          httpMetadata?: { contentType?: string };
+          customMetadata?: Record<string, string>;
+          onlyIf?: { etagDoesNotMatch?: string; etagMatches?: string };
+        },
       ) => {
         const current = objects.get(key);
         const { etagDoesNotMatch, etagMatches } = options?.onlyIf ?? {};
         if (etagDoesNotMatch === "*" && current) return null;
         if (etagMatches !== undefined && current?.etag !== etagMatches) return null;
-        const stored = { bytes: new Uint8Array(value), contentType: options?.httpMetadata?.contentType, etag: `v${(version += 1)}` };
+        const stored = {
+          bytes: new Uint8Array(value),
+          contentType: options?.httpMetadata?.contentType,
+          customMetadata: options?.customMetadata,
+          etag: `v${(version += 1)}`,
+          uploaded: new Date(version),
+        };
         objects.set(key, stored);
         return {};
       },
@@ -34,6 +47,16 @@ export function createFakeBucket() {
     head: vi.fn(async (key: string) => {
       const object = objects.get(key);
       return object ? { etag: object.etag } : null;
+    }),
+    list: vi.fn(async ({ prefix, cursor, include }: { prefix: string; cursor?: string; include?: string[] }) => {
+      const keys = [...objects.keys()].filter((key) => key.startsWith(prefix)).sort();
+      const start = cursor ? Number(cursor) : 0;
+      const page = keys.slice(start, start + FAKE_LIST_PAGE).map((key) => {
+        const object = objects.get(key)!;
+        return { key, uploaded: object.uploaded, ...(include?.includes("customMetadata") ? { customMetadata: object.customMetadata ?? {} } : {}) };
+      });
+      const truncated = start + FAKE_LIST_PAGE < keys.length;
+      return { objects: page, truncated, ...(truncated ? { cursor: String(start + FAKE_LIST_PAGE) } : {}) };
     }),
   };
 }
