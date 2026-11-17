@@ -44,12 +44,15 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
    "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID`, plus the
    repository variables `NEXT_PUBLIC_SUPABASE_URL` and
    `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-2. Create the R2 bucket for crossword photos, puzzles and their letters, named `heyu` (bound
+2. Create the R2 bucket for crossword photos, puzzles, their letters and each room's chat, named `heyu` (bound
    as `PHOTOS` in `wrangler.jsonc`), and let them expire after 7 days:
    `pnpm exec wrangler r2 bucket create heyu`,
    `pnpm exec wrangler r2 bucket lifecycle add heyu expire-photos photos/ --expire-days 7`,
-   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-puzzles puzzles/ --expire-days 7` and
-   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-letters letters/ --expire-days 7`.
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-puzzles puzzles/ --expire-days 7`,
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-letters letters/ --expire-days 7` and
+   `pnpm exec wrangler r2 bucket lifecycle add heyu expire-chat chat/ --expire-days 7`.
+   R2 counts the days from an object's last write, so a room's chat lasts
+   7 days from its latest message.
 3. After the first deploy, set the runtime secrets:
    `pnpm exec wrangler secret put APP_PASSWORD` and
    `pnpm exec wrangler secret put GEMINI_API_KEY`.
@@ -78,16 +81,16 @@ use `pnpm preview`.
   shows the current puzzle's link. `/api/puzzles` lists the recent ones for
   the start page, from metadata stored beside each puzzle.
 - **Sync**: peers exchange chat messages, letters and the puzzle over Supabase
-  Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). Apart from photos,
-  nothing is stored on a server; when a client joins it asks the room for the
-  current puzzle. Within a room the newest puzzle wins (a crossword started
+  Realtime broadcast (`src/hooks/useCrosswordRoom.ts`). When a client joins it
+  asks the room for the current puzzle, and loads the room's stored chat
+  (`src/lib/storedChat.ts`), so a late joiner or someone who dropped out sees
+  what was said. Within a room the newest puzzle wins (a crossword started
   over) and letters are merged (`src/lib/board.ts`). Every payload from a peer
   is validated before use.
 
 ### Known limitations
 
-- State lives only in connected browsers; when everyone leaves, the puzzle and
-  chat are gone. A puzzle's link brings back the puzzle, but not the letters,
-  until it expires.
+- A puzzle's link brings back the puzzle, its letters and the room's chat
+  until they expire.
 - Anyone with the password is trusted: they can open any crossword, start it
   over, or use any nickname.

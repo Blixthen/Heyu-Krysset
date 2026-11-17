@@ -23,7 +23,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 const { useCrosswordRoom } = await import("./useCrosswordRoom");
 const { SAVE_DELAY_MS } = await import("./useLetterSaving");
-const { hasReacted } = await import("@/lib/reactions");
+const { CHAT_SAVE_TIMEOUT_MS } = await import("./useChatSaving");
+const { hasReacted, MAX_VERSION_AHEAD_MS } = await import("@/lib/reactions");
 
 const TOPIC = "crossword-secret";
 const ROOM = "3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c";
@@ -32,6 +33,36 @@ function mockRoomResponse(response: () => Response) {
   const fetchMock = vi.fn(async () => response());
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+const CHAT_URL = `/api/room/${ROOM}/chat`;
+
+/** Answers /api/room with the topic and the room's chat with `stored`, recording what is saved there. */
+function mockChat(stored: () => unknown) {
+  return mockRoomResponseFor((url, init) => {
+    if (url === CHAT_URL && init?.method === "POST") return new Response(null, { status: 204 });
+    if (url === CHAT_URL) return Response.json(stored());
+    return Response.json({ topic: TOPIC });
+  });
+}
+
+function mockRoomResponseFor(respond: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => respond(url, init));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** The chats this tab saved, in order. */
+function chatSaves() {
+  return vi
+    .mocked(fetch)
+    .mock.calls.filter(([url, init]) => url === CHAT_URL && init?.method === "POST")
+    .map(([, init]) => JSON.parse(String(init?.body)));
+}
+
+/** The per-tab id this tab's presence is tracked under. */
+function presenceKey(channel: { options?: unknown }) {
+  return (channel.options as { config: { presence: { key: string } } }).config.presence.key;
 }
 
 async function flush(ms = 0) {
@@ -61,6 +92,15 @@ const validMessage = {
   text: "Hej",
   sentAt: "2026-11-08T12:00:00.000Z",
 };
+
+const LOADED_MARK = { ...validMessage, id: "loaded", sentAt: "2026-11-08T10:00:00.000Z" };
+/** A stored chat whose only message shows when the load has landed (waitForChat). */
+const MARKED_CHAT = { messages: [LOADED_MARK], reactions: [] };
+
+/** Waits until the stored chat has loaded; reading the response takes real time, not fake. */
+async function waitForChat(room: { result: { current: { messages: { id: string }[] } } }, id = LOADED_MARK.id) {
+  await vi.waitFor(() => expect(room.result.current.messages.some((message) => message.id === id)).toBe(true));
+}
 
 describe("useCrosswordRoom", () => {
   beforeEach(() => {
@@ -237,17 +277,200 @@ describe("useCrosswordRoom", () => {
       expect(hasReacted(room.result.current.reactions, "m1", "🎉", clientId)).toBe(true);
       await act(() => room.result.current.react("m1", "🎉"));
       expect(hasReacted(room.result.current.reactions, "m1", "🎉", clientId)).toBe(false);
-      expect(room.channel().sentEvents("reaction")).toEqual([
-        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: true },
-        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: false },
+      const sent = room.channel().sentEvents("reaction") as { version: number }[];
+      expect(sent).toEqual([
+        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: true, version: expect.any(Number) },
+        { messageId: "m1", emoji: "🎉", senderId: clientId, nickname: "Nova", on: false, version: expect.any(Number) },
       ]);
+      // Within the same millisecond too, the later change carries the higher version.
+      expect(sent[1].version).toBeGreaterThan(sent[0].version);
+    });
+
+    it("keeps a peer's newest change, whatever order they arrive in", async () => {
+      const room = await goLive();
+      act(() => room.channel().receive("reaction", { ...peerReaction, on: false, version: 20 }));
+      act(() => room.channel().receive("reaction", { ...peerReaction, version: 10 }));
+      expect(hasReacted(room.result.current.reactions, "m1", "👍", "peer")).toBe(false);
+    });
+
+    it("ignores a reaction whose version is too far ahead of our clock", async () => {
+      const room = await goLive();
+      act(() => room.channel().receive("reaction", { ...peerReaction, version: Date.now() + MAX_VERSION_AHEAD_MS + 60_000 }));
+      expect(hasReacted(room.result.current.reactions, "m1", "👍", "peer")).toBe(false);
     });
 
     it("takes back a reaction that could not be sent", async () => {
       const room = await goLive();
       room.channel().sendResult = "error";
       await act(() => room.result.current.react("m1", "🎉"));
-      expect(room.result.current.reactions.size).toBe(0);
+      expect(hasReacted(room.result.current.reactions, "m1", "🎉", room.result.current.clientId)).toBe(false);
+      expect(chatSaves()).toEqual([]);
+    });
+  });
+
+  describe("stored chat", () => {
+    const stored = {
+      messages: [
+        { ...validMessage, id: "s1", sentAt: "2026-11-08T11:00:00.000Z" },
+        { ...validMessage, id: "s2", sentAt: "2026-11-08T13:00:00.000Z" },
+      ],
+      reactions: [{ messageId: "s1", emoji: "❤️", senderId: "peer", nickname: "Peer", on: true, version: 5 }],
+    };
+
+    it("loads the room's chat once live, in the order it was sent among what arrived live", async () => {
+      mockChat(() => stored);
+      const room = await connect();
+      act(() => room.channel().receive("message", validMessage));
+      act(() => room.channel().status("SUBSCRIBED"));
+      await waitForChat(room, "s2");
+      expect(fetch).toHaveBeenCalledWith(CHAT_URL, { cache: "no-store" });
+      expect(room.result.current.messages.map((message) => message.id)).toEqual(["s1", "m1", "s2"]);
+      expect(hasReacted(room.result.current.reactions, "s1", "❤️", "peer")).toBe(true);
+    });
+
+    it("loads again after reconnecting, and stores back what only we saw meanwhile", async () => {
+      let chat: unknown = MARKED_CHAT;
+      mockChat(() => chat);
+      const room = await goLive();
+      await waitForChat(room);
+      expect(chatSaves()).toEqual([]);
+      // A peer's message whose own save never landed.
+      act(() => room.channel().receive("message", validMessage));
+      chat = { ...stored, messages: [LOADED_MARK, ...stored.messages] };
+      act(() => room.channel().status("CLOSED"));
+      await flush(8000);
+      act(() => room.channel().status("SUBSCRIBED"));
+      await waitForChat(room, "s2");
+      await flush();
+      expect(room.result.current.messages.map((message) => message.id)).toEqual(["loaded", "s1", "m1", "s2"]);
+      expect(chatSaves()).toEqual([{ messages: [validMessage], reactions: [] }]);
+    });
+
+    it("loads what is valid of the stored chat, leaving out the rest", async () => {
+      mockChat(() => ({
+        messages: [{ ...validMessage, id: "bad", text: "" }, LOADED_MARK],
+        reactions: [
+          { messageId: "loaded", emoji: "❤️", senderId: "peer", nickname: "Peer", on: true, version: 5 },
+          // Too far ahead of our clock.
+          { messageId: "loaded", emoji: "👍", senderId: "peer", nickname: "Peer", on: true, version: Date.now() + MAX_VERSION_AHEAD_MS + 60_000 },
+        ],
+      }));
+      const room = await goLive();
+      await waitForChat(room);
+      expect(room.result.current.messages.map((message) => message.id)).toEqual(["loaded"]);
+      expect(hasReacted(room.result.current.reactions, "loaded", "❤️", "peer")).toBe(true);
+      expect(hasReacted(room.result.current.reactions, "loaded", "👍", "peer")).toBe(false);
+    });
+
+    it("marks only the first load as history; what a reconnect brings was missed", async () => {
+      let chat: unknown = MARKED_CHAT;
+      mockChat(() => chat);
+      const room = await goLive();
+      await waitForChat(room);
+      chat = { messages: [LOADED_MARK, { ...validMessage, id: "missed" }], reactions: [] };
+      act(() => room.channel().status("CLOSED"));
+      await flush(8000);
+      act(() => room.channel().status("SUBSCRIBED"));
+      await waitForChat(room, "missed");
+      expect(room.result.current.messages.map(({ id, history }) => ({ id, history }))).toEqual([
+        { id: "loaded", history: true },
+        { id: "missed", history: undefined },
+      ]);
+    });
+
+    it("saves our message once it is sent, but not a peer's or one that failed", async () => {
+      mockChat(() => MARKED_CHAT);
+      const room = await goLive();
+      await waitForChat(room);
+      act(() => room.channel().receive("message", validMessage));
+      await act(() => room.result.current.sendMessage("Hej"));
+      room.channel().sendResult = "error";
+      await act(() => room.result.current.sendMessage("Borta"));
+      await flush();
+      const saves = chatSaves();
+      expect(saves).toHaveLength(1);
+      expect(saves[0].messages).toEqual([expect.objectContaining({ text: "Hej", senderId: room.result.current.clientId })]);
+    });
+
+    it("saves our reactions with their versions, the latest last", async () => {
+      mockChat(() => MARKED_CHAT);
+      const room = await goLive();
+      await waitForChat(room);
+      await act(() => room.result.current.react("m1", "🎉"));
+      await flush();
+      await act(() => room.result.current.react("m1", "🎉"));
+      await flush();
+      const saved = chatSaves().flatMap((save) => save.reactions);
+      expect(saved.map((reaction: { on: boolean }) => reaction.on)).toEqual([true, false]);
+      expect(saved[1].version).toBeGreaterThan(saved[0].version);
+    });
+
+    it("sends what arrives during a save together in the next one", async () => {
+      let finish: (response: Response) => void = () => {};
+      mockRoomResponseFor((url, init) => {
+        if (url === CHAT_URL && init?.method === "POST") return new Promise<Response>((resolve) => (finish = resolve));
+        if (url === CHAT_URL) return Response.json(MARKED_CHAT);
+        return Response.json({ topic: TOPIC });
+      });
+      const room = await goLive();
+      await waitForChat(room);
+      await act(() => room.result.current.sendMessage("Ett"));
+      await act(() => room.result.current.sendMessage("Två"));
+      await act(() => room.result.current.sendMessage("Tre"));
+      expect(chatSaves()).toHaveLength(1);
+      await act(async () => finish(new Response(null, { status: 204 })));
+      await flush();
+      // Sent within the same millisecond, so their order in the batch is up to their random ids.
+      expect(chatSaves().map((save) => save.messages.map((message: { text: string }) => message.text).sort())).toEqual([["Ett"], ["Tre", "Två"]]);
+    });
+
+    it("gives up a save that hangs, so the next one still goes out", async () => {
+      mockRoomResponseFor((url, init) => {
+        if (url === CHAT_URL && init?.method === "POST") {
+          // Never answers, but gives up when aborted, as fetch does.
+          return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+        }
+        if (url === CHAT_URL) return Response.json(MARKED_CHAT);
+        return Response.json({ topic: TOPIC });
+      });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const room = await goLive();
+      await waitForChat(room);
+      await act(() => room.result.current.sendMessage("Ett"));
+      await act(() => room.result.current.sendMessage("Två"));
+      expect(chatSaves()).toHaveLength(1);
+      await flush(CHAT_SAVE_TIMEOUT_MS);
+      expect(chatSaves()).toHaveLength(2);
+    });
+
+    it("saves to the room a message was sent in, even if the room changes while a save is out", async () => {
+      const other = "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+      const finishes: ((response: Response) => void)[] = [];
+      mockRoomResponseFor((url, init) => {
+        if (init?.method === "POST") return new Promise<Response>((resolve) => finishes.push(resolve));
+        if (url.endsWith("/chat")) return Response.json(MARKED_CHAT);
+        return Response.json({ topic: TOPIC });
+      });
+      const hook = renderHook(({ room }) => useCrosswordRoom("Nova", room), { initialProps: { room: ROOM } });
+      await flush();
+      act(() => fake.client!.latest!.status("SUBSCRIBED"));
+      await waitForChat(hook);
+      await act(() => hook.result.current.sendMessage("Här"));
+      hook.rerender({ room: other });
+      await flush();
+      act(() => fake.client!.latest!.status("SUBSCRIBED"));
+      await flush();
+      await act(() => hook.result.current.sendMessage("Där"));
+      await act(async () => finishes[0](new Response(null, { status: 204 })));
+      await flush();
+      const posts = vi
+        .mocked(fetch)
+        .mock.calls.filter(([, init]) => init?.method === "POST")
+        .map(([url, init]) => [url, JSON.parse(String(init?.body)).messages.map((message: { text: string }) => message.text)]);
+      expect(posts).toEqual([
+        [CHAT_URL, ["Här"]],
+        [`/api/room/${other}/chat`, ["Där"]],
+      ]);
     });
   });
 
@@ -258,7 +481,17 @@ describe("useCrosswordRoom", () => {
       act(() => room.channel().status("SUBSCRIBED"));
       await flush();
       expect(room.channel().track).toHaveBeenCalledWith({ nickname: "Nova" });
-      expect(room.channel().options).toMatchObject({ config: { presence: { key: room.result.current.clientId, enabled: true } } });
+      expect(room.channel().options).toMatchObject({ config: { presence: { enabled: true } } });
+    });
+
+    it("tracks each tab apart, while messages carry the id the browser keeps across reloads", async () => {
+      const first = await goLive();
+      const firstKey = presenceKey(first.channel());
+      first.unmount();
+      const second = await goLive();
+      expect(second.result.current.clientId).toBe(first.result.current.clientId);
+      expect(presenceKey(second.channel())).not.toBe(firstKey);
+      expect(presenceKey(second.channel())).not.toBe(second.result.current.clientId);
     });
 
     it("lists the valid nicknames of everyone in the room", async () => {
@@ -301,8 +534,7 @@ describe("useCrosswordRoom", () => {
 
     it("announces again when a presence sync is missing us", async () => {
       const room = await goLive();
-      const clientId = room.result.current.clientId;
-      act(() => room.channel().syncPresence({ [clientId]: [{ nickname: "Nova" }] }));
+      act(() => room.channel().syncPresence({ [presenceKey(room.channel())]: [{ nickname: "Nova" }] }));
       await flush();
       expect(room.channel().track).toHaveBeenCalledTimes(1);
       act(() => room.channel().syncPresence({ other: [{ nickname: "Kim" }] }));

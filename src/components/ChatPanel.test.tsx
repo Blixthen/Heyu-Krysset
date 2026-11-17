@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { DisplayMessage } from "@/hooks/useCrosswordRoom";
-import type { Reactions } from "@/lib/reactions";
+import { applyReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -104,13 +104,27 @@ describe("ChatPanel", () => {
 
     it("shows who reacted, marks our own reaction, and toggles it on tap", () => {
       const onReact = vi.fn();
-      const reactions = new Map([
-        ["m2", new Map([["👍", new Map([["peer", "Kim"], ["me", "Nova"]])], ["❤️", new Map([["peer", "Kim"]])]])],
-      ]) as Reactions;
+      const reaction = (emoji: ReactionEmoji, senderId: string, nickname: string, on = true, version = 1): Reaction => ({
+        messageId: "m2",
+        emoji,
+        senderId,
+        nickname,
+        on,
+        version,
+      });
+      const reactions = [
+        reaction("👍", "peer", "Kim"),
+        reaction("👍", "me", "Nova"),
+        reaction("❤️", "peer", "Kim"),
+        // Taken back, so not shown.
+        reaction("🎉", "peer", "Kim"),
+        reaction("🎉", "peer", "Kim", false, 2),
+      ].reduce<Reactions>(applyReaction, new Map());
       renderPanel({ messages: [peerMessage], reactions, onReact });
       const thumbs = screen.getByRole("button", { name: "👍 2: Kim, Nova" });
       expect(thumbs.getAttribute("aria-pressed")).toBe("true");
       expect(screen.getByRole("button", { name: "❤️ 1: Kim" }).getAttribute("aria-pressed")).toBe("false");
+      expect(screen.queryByRole("button", { name: /🎉/ })).toBeNull();
       fireEvent.click(thumbs);
       expect(onReact).toHaveBeenCalledWith("m2", "👍");
     });

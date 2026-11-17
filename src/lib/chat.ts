@@ -2,7 +2,7 @@ import { MAX_NICKNAME_LENGTH } from "./players";
 
 export type ChatMessage = {
   id: string;
-  /** Random per-tab id, used to tell our own messages apart from same-named peers. */
+  /** The sender's browser id (senderId in sender.ts), used to tell our own messages apart from same-named peers. */
   senderId: string;
   nickname: string;
   text: string;
@@ -57,10 +57,29 @@ export function appendMessage<T extends { id: string }>(list: T[], message: T) {
 }
 
 /**
- * Messages from others that arrived after `lastSeenId`. If that message is no
- * longer in the list (trimmed, or nothing seen yet), every message counts.
+ * Messages from others that arrived after `lastSeenId`, apart from the
+ * history loaded on joining, which was said before we came. If that message
+ * is no longer in the list (trimmed, or nothing seen yet), every message counts.
  */
-export function countUnread(messages: ChatMessage[], lastSeenId: string | null, clientId: string) {
+export function countUnread(messages: (ChatMessage & { history?: boolean })[], lastSeenId: string | null, clientId: string) {
   const seenAt = lastSeenId === null ? -1 : messages.findIndex((message) => message.id === lastSeenId);
-  return messages.slice(seenAt + 1).filter((message) => message.senderId !== clientId).length;
+  return messages.slice(seenAt + 1).filter((message) => message.senderId !== clientId && !message.history).length;
+}
+
+/** Oldest first by when they were sent; the id settles a tie, so every tab orders them alike. */
+export function compareMessages(a: ChatMessage, b: ChatMessage) {
+  return Date.parse(a.sentAt) - Date.parse(b.sentAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * Adds stored messages we don't have, in the order they were sent, keeping
+ * the newest MAX_MESSAGES. Ours win for an id both have, so a message we
+ * failed to send stays marked.
+ */
+export function mergeMessages<T extends ChatMessage>(list: T[], incoming: T[]) {
+  const known = new Set(list.map((message) => message.id));
+  const added = incoming.filter((message) => !known.has(message.id));
+  if (added.length === 0) return list;
+  const merged = [...list, ...added].sort(compareMessages);
+  return merged.length > MAX_MESSAGES ? merged.slice(merged.length - MAX_MESSAGES) : merged;
 }
