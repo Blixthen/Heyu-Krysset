@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendMessage, countUnread, formatTime, isChatMessage, MAX_MESSAGES, toChatMessage, type ChatMessage } from "./chat";
+import { appendMessage, countUnread, formatTime, isChatMessage, MAX_MESSAGES, mergeMessages, toChatMessage, type ChatMessage } from "./chat";
 
 const message: ChatMessage = {
   id: "m1",
@@ -82,5 +82,41 @@ describe("countUnread", () => {
   it("counts everything when nothing was seen or the seen message was trimmed", () => {
     expect(countUnread(messages, null, "me")).toBe(3);
     expect(countUnread(messages, "gone", "me")).toBe(3);
+  });
+
+  it("does not count the history loaded on joining, only what came after it", () => {
+    const withHistory = [{ ...message("h1", "peer"), history: true }, { ...message("h2", "peer"), history: true }, message("new", "peer")];
+    expect(countUnread(withHistory, null, "me")).toBe(1);
+  });
+});
+
+describe("mergeMessages", () => {
+  const at = (id: string, minute: number): ChatMessage => ({
+    id,
+    senderId: "s",
+    nickname: "Kim",
+    text: id,
+    sentAt: `2026-11-17T12:${String(minute).padStart(2, "0")}:00.000Z`,
+  });
+
+  it("adds stored messages we lack, in the order they were sent", () => {
+    const merged = mergeMessages([at("b", 2), at("d", 4)], [at("a", 1), at("b", 2), at("c", 3)]);
+    expect(merged.map((message) => message.id)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("keeps our copy of a message both have, so a failed mark stays", () => {
+    const ours = [{ ...at("a", 1), failed: true }];
+    expect(mergeMessages(ours, [{ ...at("a", 1), failed: false }])).toBe(ours);
+  });
+
+  it("orders messages sent at the same moment by id", () => {
+    expect(mergeMessages([at("y", 1)], [at("x", 1)]).map((message) => message.id)).toEqual(["x", "y"]);
+  });
+
+  it(`keeps the newest ${MAX_MESSAGES}`, () => {
+    const stored = Array.from({ length: MAX_MESSAGES }, (_, index) => at(`s${index}`, 10 + (index % 40)));
+    const merged = mergeMessages([at("old", 0)], stored);
+    expect(merged).toHaveLength(MAX_MESSAGES);
+    expect(merged.some((message) => message.id === "old")).toBe(false);
   });
 });

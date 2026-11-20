@@ -1,7 +1,7 @@
 "use client";
 
 import { boardReducer, emptyBoard, photoBelongsTo, restoreAddsToRoom, type BoardAction } from "@/lib/board";
-import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, toChatMessage, type ChatMessage } from "@/lib/chat";
+import { appendMessage, isChatMessage, MAX_MESSAGE_LENGTH, mergeMessages, toChatMessage, type ChatMessage } from "@/lib/chat";
 import {
   authorsFromPayload,
   isCellUpdate,
@@ -15,17 +15,30 @@ import {
   type Letters,
 } from "@/lib/crossword";
 import { isPlayerName, onlineNames, sameNames } from "@/lib/players";
-import { applyReaction, hasReacted, isReaction, toReaction, type Reaction, type ReactionEmoji, type Reactions } from "@/lib/reactions";
+import { isRandomId } from "@/lib/photo";
+import {
+  applyReaction,
+  hasReacted,
+  isReaction,
+  toReaction,
+  versionedReactions,
+  type ReactionEmoji,
+  type Reactions,
+} from "@/lib/reactions";
 import { roomChannel } from "@/lib/room";
+import { senderId, takeReactionVersion } from "@/lib/sender";
+import { chatUrl, isEmptyChat, missingFrom, readStoredChat, type StoredChat, type StoredReaction } from "@/lib/storedChat";
 import type { SavedLetters } from "@/lib/storedLetters";
 import { isSecretSupabaseKey, isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+import { useChatSaving } from "./useChatSaving";
 import { useLetterSaving } from "./useLetterSaving";
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 
 export type RoomStatus = "connecting" | "live" | "error" | "unconfigured";
-export type DisplayMessage = ChatMessage & { failed?: boolean };
+/** `history`: loaded on joining, so said before we came and never unread. */
+export type DisplayMessage = ChatMessage & { failed?: boolean; history?: boolean };
 
 /**
  * Realtime events on the room channel:
@@ -34,7 +47,9 @@ export type DisplayMessage = ChatMessage & { failed?: boolean };
  * - "cell-update":  a CellUpdate for one letter and who typed it
  * - "sync-request": sent by a client that just (re)joined; one peer answers with "puzzle"
  * - "reaction":     a Reaction, one player adding or removing an emoji on a message
- * Presence, keyed by client id, tracks { nickname } for everyone in the room.
+ * Presence, keyed by a per-tab id, tracks { nickname } for everyone in the room.
+ * The chat is also stored per room (useChatSaving) and loaded on every
+ * (re)connect, so whoever joins late or drops out sees what was said.
  */
 const MAX_RETRIES = 4;
 const SYNC_JITTER_MS = [50, 400] as const;
@@ -70,7 +85,10 @@ async function removeChannels(client: SupabaseClient, channels: RealtimeChannel[
  * null until the crossword is known, and nothing connects before then.
  */
 export function useCrosswordRoom(nickname: string, room: string | null) {
-  const [clientId] = useState(() => crypto.randomUUID());
+  // Messages and reactions carry the browser's id, so stored ones stay ours after a reload.
+  const [clientId] = useState(senderId);
+  // Presence is per tab, so closing one of two tabs doesn't take the other off the list.
+  const [presenceKey] = useState(() => crypto.randomUUID());
   const [status, setStatus] = useState<"connecting" | "live" | "error">("connecting");
   const [connectionError, setConnectionError] = useState("");
   const [sendError, setSendError] = useState("");
@@ -91,6 +109,16 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
   }, []);
   const latestBoard = useCallback(() => boardRef.current, []);
   const saveLettersSoon = useLetterSaving(latestBoard);
+  const saveChat = useChatSaving(room);
+  // Only a room's first load is history; one after a reconnect brings what we missed.
+  const historyRoom = useRef<string | null>(null);
+  // The chat belongs to its room: another room starts without it, so it can't be stored there.
+  const [chatRoom, setChatRoom] = useState(room);
+  if (chatRoom !== room) {
+    setChatRoom(room);
+    setMessages([]);
+    setReactions(new Map());
+  }
   const [generation, setGeneration] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -98,6 +126,16 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
   const readBoard = useEffectEvent(() => board);
   const readNickname = useEffectEvent(() => nickname);
   const goToLogin = useEffectEvent(() => router.replace("/login"));
+  /** Adds a loaded chat to ours, and stores back what we have that it lacks. */
+  const addStoredChat = useEffectEvent((stored: StoredChat, from: string) => {
+    const ours = { messages: messages.filter((message) => !message.failed), reactions: versionedReactions(reactions) };
+    const missing = missingFrom(stored, ours);
+    const history = historyRoom.current !== from;
+    historyRoom.current = from;
+    setMessages((list) => mergeMessages(list, history ? stored.messages.map((message) => ({ ...message, history })) : stored.messages));
+    setReactions((current) => stored.reactions.reduce(applyReaction, current));
+    if (!isEmptyChat(missing)) saveChat(missing);
+  });
 
   const broadcastPuzzle = useCallback(
     async (channel: RealtimeChannel, puzzle: CrosswordPuzzle, letters: Letters, authors: Authors) => {
@@ -138,6 +176,20 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
       retryTimer = window.setTimeout(() => void connect(), Math.min(1000 * 2 ** attempt, 8000));
     };
 
+    /** Never throws: without the stored chat, the room still works live. */
+    const loadChat = async () => {
+      if (!isRandomId(room)) return;
+      try {
+        const response = await fetch(chatUrl(room), { cache: "no-store" });
+        if (!response.ok) return;
+        // Whatever our clock rules out is left out, not the whole chat (readStoredChat).
+        const stored = readStoredChat(await response.json(), Date.now());
+        if (!cancelled) addStoredChat(stored, room);
+      } catch (error) {
+        console.warn("chat: loading failed", error);
+      }
+    };
+
     const connect = async () => {
       try {
         topic ??= roomChannel(await fetchRoomTopic(), room);
@@ -165,7 +217,7 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
       if (cancelled) return;
 
       const channel = client.channel(topic, {
-        config: { broadcast: { self: false }, presence: { key: clientId, enabled: true }, private: false },
+        config: { broadcast: { self: false }, presence: { key: presenceKey, enabled: true }, private: false },
       });
       if (channel.state !== "closed") {
         retry("Kanalen var fortfarande upptagen.");
@@ -193,14 +245,14 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
           const state = channel.presenceState();
           const next = onlineNames(state);
           setOnline((list) => (sameNames(list, next) ? list : next));
-          if (channelRef.current === channel && !(clientId in state)) void announce();
+          if (channelRef.current === channel && !(presenceKey in state)) void announce();
         })
         .on("broadcast", { event: "message" }, ({ payload }) => {
           if (!isChatMessage(payload)) return;
           setMessages((list) => appendMessage(list, toChatMessage(payload)));
         })
         .on("broadcast", { event: "reaction" }, ({ payload }) => {
-          if (!isReaction(payload)) return;
+          if (!isReaction(payload, Date.now())) return;
           const reaction = toReaction(payload);
           setReactions((current) => applyReaction(current, reaction));
         })
@@ -249,6 +301,8 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
             if (puzzle) void broadcastPuzzle(channel, puzzle, letters, authors);
             void channel.send({ type: "broadcast", event: "sync-request", payload: {} });
             void announce();
+            // After subscribing, so nothing said meanwhile falls between the load and the live events.
+            void loadChat();
             return;
           }
           if (state === "CHANNEL_ERROR" || state === "TIMED_OUT" || state === "CLOSED") {
@@ -267,7 +321,7 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
       channelRef.current = null;
       if (current) void client.removeChannel(current);
     };
-  }, [apply, broadcastPuzzle, clientId, generation, room]);
+  }, [apply, broadcastPuzzle, generation, presenceKey, room]);
 
   const reconnect = useCallback(() => {
     setStatus("connecting");
@@ -291,7 +345,10 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
       const result = channel
         ? await channel.send({ type: "broadcast", event: "message", payload: message })
         : "error";
-      if (result === "ok") return;
+      if (result === "ok") {
+        saveChat({ messages: [message], reactions: [] });
+        return;
+      }
 
       setMessages((list) => list.map((item) => (item.id === message.id ? { ...item, failed: true } : item)));
       setSendError(
@@ -302,18 +359,23 @@ export function useCrosswordRoom(nickname: string, room: string | null) {
             : "Inte ansluten till kanalen ännu.",
       );
     },
-    [clientId, nickname],
+    [clientId, nickname, saveChat],
   );
 
   const react = useCallback(
     async (messageId: string, emoji: ReactionEmoji) => {
-      const reaction: Reaction = { messageId, emoji, senderId: clientId, nickname, on: !hasReacted(reactions, messageId, emoji, clientId) };
+      const on = !hasReacted(reactions, messageId, emoji, clientId);
+      const reaction: StoredReaction = { messageId, emoji, senderId: clientId, nickname, on, version: takeReactionVersion(Date.now()) };
       setReactions((current) => applyReaction(current, reaction));
       const result = await channelRef.current?.send({ type: "broadcast", event: "reaction", payload: reaction });
+      if (result === "ok") {
+        saveChat({ messages: [], reactions: [reaction] });
+        return;
+      }
       // Nobody else saw it, so take it back rather than show a reaction only we have.
-      if (result !== "ok") setReactions((current) => applyReaction(current, { ...reaction, on: !reaction.on }));
+      setReactions((current) => applyReaction(current, { ...reaction, on: !on, version: takeReactionVersion(Date.now()) }));
     },
-    [clientId, nickname, reactions],
+    [clientId, nickname, reactions, saveChat],
   );
 
   const publishPuzzle = useCallback(
