@@ -73,7 +73,7 @@ function overlap(a: LetterCell, b: LetterCell) {
 /**
  * The squares bucketed by position, in buckets as big as the biggest square:
  * a square overlapping another has its centre within one bucket of the
- * other's, whatever their indices (Gemini's can be off), so finding overlaps
+ * other's, whatever their indices (older puzzles' can be off), so finding overlaps
  * only looks at nearby squares.
  */
 function byPosition(cells: LetterCell[]) {

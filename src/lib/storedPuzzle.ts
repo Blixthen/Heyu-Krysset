@@ -1,4 +1,4 @@
-import type { Result } from "./analyze";
+import type { Result } from "./result";
 import { isCrosswordPuzzle, MAX_CELLS, toCrosswordPuzzle, type CrosswordPuzzle } from "./crossword";
 import { isRandomId } from "./photo";
 import { roomOf } from "./room";

@@ -3,7 +3,7 @@ import { isPlayerName } from "./players";
 
 /**
  * Shared crossword types and validators. Used by both the browser (to validate
- * realtime payloads from peers) and the server (to validate Gemini output).
+ * realtime payloads from peers) and the server (to validate stored puzzles).
  * Coordinates are integers-ish on a 0–1000 scale relative to the full image.
  */
 

@@ -234,7 +234,7 @@ describe("words", () => {
   });
 
   it("treats boxes drawn tighter than the grid as neighbours, but not across a clue square", () => {
-    // 30-unit boxes on a 50-unit pitch, as Gemini sometimes draws them; column 2 is a clue square.
+    // 30-unit boxes on a 50-unit pitch, as older puzzles have them; column 2 is a clue square.
     const tight = [0, 1, 3].map((col) => ({ row: 0, col, x: 100 + col * 50, y: 100, w: 30, h: 30 }));
     expect(adjacentCell(tight, tight[0], 0, 1)).toBe(tight[1]);
     expect(adjacentCell(tight, tight[1], 0, 1)).toBeNull();

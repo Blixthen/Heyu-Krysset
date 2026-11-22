@@ -1,4 +1,4 @@
-import type { AnalyzeFailure, Result } from "./analyze";
+import type { Result, UserFailure } from "./result";
 
 /**
  * Stored crossword photos. The browser uploads a sharp JPEG once to
@@ -43,8 +43,8 @@ export function checkDeclaredLength(contentLength: string | null): Result<null> 
   return { ok: true, value: null };
 }
 
-const TOO_LARGE: AnalyzeFailure = { message: "Bilden är för stor.", status: 413 };
-const NOT_JPEG: AnalyzeFailure = { message: "Bilden måste vara en JPEG.", status: 415 };
+const TOO_LARGE: UserFailure = { message: "Bilden är för stor.", status: 413 };
+const NOT_JPEG: UserFailure = { message: "Bilden måste vara en JPEG.", status: 415 };
 
 /** Checks an uploaded photo: a non-empty JPEG within MAX_PHOTO_BYTES, by its bytes, not only its header. */
 export function checkPhotoUpload(contentType: string | null, bytes: Uint8Array): Result<Uint8Array> {

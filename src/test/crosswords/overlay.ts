@@ -3,7 +3,7 @@ import type { CrosswordPhoto, Point } from "./photos";
 
 /**
  * Draws a reading over its photo as SVG, for reviewing by eye what the
- * automatic checks can't judge: red boxes are the cells Gemini found, green
+ * automatic checks can't judge: red boxes are the cells the grid reading found, green
  * dots are labelled letter squares, and orange dots are labelled clue areas.
  */
 export function renderOverlay(

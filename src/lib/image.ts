@@ -7,7 +7,8 @@
  */
 export const SHARE_IMAGE_BUDGET = 180_000;
 
-const ANALYZE_MAX_WIDTH = 1400;
+/** Wide enough for readGrid to find small squares, small enough for a phone's memory (about 11 MB of pixels). */
+const READ_MAX_WIDTH = 1400;
 /**
  * The stored photo's width: clue text on a two-page magazine spread is still
  * readable at 2400 px and clear at 3000, about 0.7 MB as a JPEG.
@@ -36,8 +37,7 @@ function render(bitmap: ImageBitmap, maxWidth: number, quality: number) {
 
 /**
  * The canvas's pixels, or null if the browser refuses to hand them out
- * (fingerprinting protection, canvas memory limits). Reading the grid in the
- * browser is optional, since Gemini can still read the JPEG.
+ * (fingerprinting protection, canvas memory limits).
  */
 function readPixels(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
   try {
@@ -56,17 +56,16 @@ function toJpegBlob(canvas: HTMLCanvasElement, quality: number) {
 }
 
 /**
- * Prepares one photo for reading and sharing: the pixels of the analysis-size
- * image for reading the grid in the browser (null if the browser refuses), the same image as a high-quality
- * JPEG for Gemini when that fails, and a smaller JPEG that fits in a realtime
- * broadcast. Cell coordinates are relative (0–1000), so they apply to all three.
+ * Prepares one photo for reading and sharing: the pixels for reading the grid
+ * in the browser (null if the browser refuses), and a smaller JPEG that fits
+ * in a realtime broadcast. Cell coordinates are relative (0–1000), so they
+ * apply to both.
  */
 export async function prepareImages(file: File) {
   const bitmap = await createImageBitmap(file);
   try {
-    const { canvas, context } = draw(bitmap, ANALYZE_MAX_WIDTH);
+    const { canvas, context } = draw(bitmap, READ_MAX_WIDTH);
     const pixels = readPixels(canvas, context);
-    const analyze = base64Of(canvas.toDataURL("image/jpeg", 0.82));
     let share = "";
     search: for (const width of SHARE_WIDTHS) {
       for (const quality of SHARE_QUALITIES) {
@@ -74,7 +73,7 @@ export async function prepareImages(file: File) {
         if (base64Of(share).length <= SHARE_IMAGE_BUDGET) break search;
       }
     }
-    return { pixels, analyzeBase64: analyze, mimeType: "image/jpeg", shareDataUrl: share };
+    return { pixels, shareDataUrl: share };
   } finally {
     bitmap.close();
   }

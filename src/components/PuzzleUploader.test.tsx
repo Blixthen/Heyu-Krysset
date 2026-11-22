@@ -18,16 +18,10 @@ const pixels = { width: 2, height: 1, data: new Uint8ClampedArray(8) };
 describe("analyzeCrossword", () => {
   beforeEach(() => {
     readGrid.mockReset().mockReturnValue(null);
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    prepareImages.mockResolvedValue({
-      pixels,
-      analyzeBase64: "HIGHRES",
-      mimeType: "image/jpeg",
-      shareDataUrl: "data:image/jpeg;base64,SMALL",
-    });
+    prepareImages.mockResolvedValue({ pixels, shareDataUrl: "data:image/jpeg;base64,SMALL" });
   });
 
-  it("reads the grid in the browser without calling Gemini", async () => {
+  it("reads the grid in the browser and shares the small image, without any request", async () => {
     const cells = gridCells(2, 5);
     readGrid.mockReturnValue(cells);
     const fetchMock = vi.fn();
@@ -39,64 +33,33 @@ describe("analyzeCrossword", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(puzzle.cells).toEqual(cells);
     expect(puzzle.image).toBe("data:image/jpeg;base64,SMALL");
-  });
-
-  it("asks Gemini without reading the grid when the browser gave no pixels", async () => {
-    prepareImages.mockResolvedValue({ pixels: null, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
-    const cells = gridCells(2, 4);
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ cells })));
-
-    expect((await analyzeCrossword(file)).cells).toEqual(cells);
-    expect(readGrid).not.toHaveBeenCalled();
-  });
-
-  it("asks Gemini when the grid reading fails with an error", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    readGrid.mockImplementation(() => {
-      throw new RangeError("bug");
-    });
-    const cells = gridCells(3, 3);
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ cells })));
-
-    expect((await analyzeCrossword(file)).cells).toEqual(cells);
-    expect(consoleError).toHaveBeenCalledWith(expect.any(RangeError));
-  });
-
-  it("sends the high-quality image to Gemini when no grid is found, and shares the small one", async () => {
-    const cells = gridCells();
-    const fetchMock = vi.fn(async () => Response.json({ cells: [...cells, cells[0]] }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const puzzle = await analyzeCrossword(file);
-
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toEqual({ image: "HIGHRES", mimeType: "image/jpeg" });
-    expect(puzzle.image).toBe("data:image/jpeg;base64,SMALL");
-    expect(puzzle.cells).toEqual(cells);
     expect(puzzle.id).toBeTruthy();
     expect(puzzle.createdAt).toBeGreaterThan(0);
   });
 
-  it("surfaces the server's error message", async () => {
-    vi.stubGlobal("fetch", async () => Response.json({ error: "Hittade för få bokstavsrutor i bilden." }, { status: 502 }));
-    await expect(analyzeCrossword(file)).rejects.toThrow("Hittade för få bokstavsrutor i bilden.");
+  it("explains a photo with no grid in it", async () => {
+    await expect(analyzeCrossword(file)).rejects.toThrow(/Hittade inget korsord/);
+  });
+
+  it("explains a grid reading that fails with an error, and logs it", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    readGrid.mockImplementation(() => {
+      throw new RangeError("bug");
+    });
+
+    await expect(analyzeCrossword(file)).rejects.toThrow(/Hittade inget korsord/);
+    expect(consoleError).toHaveBeenCalledWith(expect.any(RangeError));
+  });
+
+  it("explains a browser that won't hand out the pixels, without reading the grid", async () => {
+    prepareImages.mockResolvedValue({ pixels: null, shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    await expect(analyzeCrossword(file)).rejects.toThrow(/Webbläsaren lät oss inte läsa bilden/);
+    expect(readGrid).not.toHaveBeenCalled();
   });
 
   it("explains unreadable images", async () => {
     prepareImages.mockRejectedValue(new DOMException("The source image could not be decoded."));
     await expect(analyzeCrossword(file)).rejects.toThrow(/Kunde inte läsa bilden/);
-  });
-
-  it("explains timeouts", async () => {
-    vi.stubGlobal("fetch", async () => {
-      throw new DOMException("timed out", "TimeoutError");
-    });
-    await expect(analyzeCrossword(file)).rejects.toThrow(/för lång tid/);
-  });
-
-  it("rejects a malformed success response", async () => {
-    vi.stubGlobal("fetch", async () => Response.json({ cells: [{ row: 0 }] }));
-    await expect(analyzeCrossword(file)).rejects.toThrow("Kunde inte tolka bilden.");
   });
 });
 
@@ -219,7 +182,7 @@ describe("PuzzleUploader", () => {
 
   it("hands over the read puzzle and its photo, without sharing or storing anything yet", async () => {
     readGrid.mockReturnValue(gridCells(2, 5));
-    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
+    prepareImages.mockResolvedValue({ pixels, shareDataUrl: "data:image/jpeg;base64,SMALL" });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     prepareStoreCopy.mockReset();
@@ -238,13 +201,12 @@ describe("PuzzleUploader", () => {
 
   it("reports a photo that couldn't be read", async () => {
     readGrid.mockReturnValue(null);
-    prepareImages.mockResolvedValue({ pixels, analyzeBase64: "HIGHRES", mimeType: "image/jpeg", shareDataUrl: "data:image/jpeg;base64,SMALL" });
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Kunde inte tolka bilden." }, { status: 422 })));
+    prepareImages.mockResolvedValue({ pixels, shareDataUrl: "data:image/jpeg;base64,SMALL" });
     const onRead = vi.fn();
     render(<PuzzleUploader onRead={onRead} />);
 
     fireEvent.change(screen.getByTestId("file-input"), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByText("Kunde inte tolka bilden.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Hittade inget korsord/)).toBeTruthy());
     expect(onRead).not.toHaveBeenCalled();
   });
 

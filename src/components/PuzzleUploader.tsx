@@ -1,6 +1,6 @@
 "use client";
 
-import { dedupeCells, isLetterCell, MIN_CELLS, type CrosswordPuzzle, type LetterCell } from "@/lib/crossword";
+import type { CrosswordPuzzle, LetterCell } from "@/lib/crossword";
 import { readGrid, type Pixels } from "@/lib/gridImage";
 import { prepareImages, prepareStoreCopy } from "@/lib/image";
 import { isPhotoId } from "@/lib/photo";
@@ -12,31 +12,24 @@ class UploadError extends Error {}
 /** How long the sharp copy (about 0.7 MB) may take to upload; the puzzle is already shared by then. */
 const STORE_TIMEOUT_MS = 60_000;
 
-type Upload = Omit<Awaited<ReturnType<typeof prepareImages>>, "pixels">;
-
 /** A photo read into a puzzle that isn't shared yet, with the photo to store once it is. */
 export type Draft = { puzzle: CrosswordPuzzle; file: File };
 
 /**
- * Reads the grid from the photo's pixels in the browser, and asks Gemini only
- * when that finds no usable grid. Returns a draft puzzle for the player to
- * check (CellEditor), which dates it again when it is shared.
+ * Reads the grid from the photo's pixels in the browser. Returns a draft
+ * puzzle for the player to check (CellEditor), which dates it again when it
+ * is shared.
  */
 export async function analyzeCrossword(file: File): Promise<CrosswordPuzzle> {
-  const { cells, upload } = await prepare(file);
-  return {
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-    image: upload.shareDataUrl,
-    cells: cells ?? (await askGemini(upload)),
-  };
+  const { cells, shareDataUrl } = await prepare(file);
+  return { id: crypto.randomUUID(), createdAt: Date.now(), image: shareDataUrl, cells };
 }
 
 /**
  * Makes and uploads a sharp copy of the photo and returns its id, or null if
- * that fails. Runs after the puzzle is shared, so it never delays it or
- * competes with the Gemini request, and is skipped for a photo that couldn't
- * be read; the inline copy still works, only less sharp.
+ * that fails. Runs after the puzzle is shared, so it never delays it, and is
+ * skipped for a photo that couldn't be read; the inline copy still works,
+ * only less sharp.
  */
 export async function storePhoto(file: File): Promise<string | null> {
   const blob = await prepareStoreCopy(file);
@@ -58,55 +51,28 @@ export async function storePhoto(file: File): Promise<string | null> {
   return null;
 }
 
-/**
- * Prepares the images and reads the grid. The pixel buffer (about 11 MB at
- * 1400 px) stays inside this call, so it can be freed before any Gemini
- * request, which may take seconds on a phone that is short of memory.
- */
-async function prepare(file: File): Promise<{ cells: LetterCell[] | null; upload: Upload }> {
+/** Prepares the images and reads the grid, or explains why it can't. */
+async function prepare(file: File): Promise<{ cells: LetterCell[]; shareDataUrl: string }> {
   let images: Awaited<ReturnType<typeof prepareImages>>;
   try {
     images = await prepareImages(file);
   } catch {
     throw new UploadError("Kunde inte läsa bilden. Prova en JPEG- eller PNG-bild.");
   }
-  const { pixels, ...upload } = images;
-  return { cells: pixels ? readLocally(pixels) : null, upload };
+  if (!images.pixels) throw new UploadError("Webbläsaren lät oss inte läsa bilden. Prova en annan webbläsare.");
+  const cells = readLocally(images.pixels);
+  if (!cells) throw new UploadError("Hittade inget korsord i bilden. Prova ett skarpare foto, rakt framifrån.");
+  return { cells, shareDataUrl: images.shareDataUrl };
 }
 
 function readLocally(pixels: Pixels) {
   try {
-    const cells = readGrid(pixels);
-    if (!cells) console.info("No grid found in the photo; asking Gemini.");
-    return cells;
+    return readGrid(pixels);
   } catch (error) {
-    // A bug in the grid reading shouldn't stop the upload while Gemini can still read it.
+    // Shown to the player like a photo with no grid, but logged as the bug it is.
     console.error(error);
     return null;
   }
-}
-
-async function askGemini(images: Upload): Promise<LetterCell[]> {
-  let response: Response;
-  try {
-    response = await fetch("/api/analyze-crossword", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: images.analyzeBase64, mimeType: images.mimeType }),
-      signal: AbortSignal.timeout(70_000),
-    });
-  } catch (error) {
-    const timedOut = error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
-    throw new UploadError(timedOut ? "Tolkningen tog för lång tid. Försök igen." : "Kunde inte skicka bilden.");
-  }
-
-  const data: unknown = await response.json().catch(() => null);
-  const cells = (data as { cells?: unknown } | null)?.cells;
-  if (response.ok && Array.isArray(cells) && cells.length >= MIN_CELLS && cells.every(isLetterCell)) {
-    return dedupeCells(cells);
-  }
-  const error = (data as { error?: unknown } | null)?.error;
-  throw new UploadError(typeof error === "string" ? error : "Kunde inte tolka bilden.");
 }
 
 /**

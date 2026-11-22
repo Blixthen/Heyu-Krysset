@@ -1,4 +1,4 @@
-import type { Result } from "./analyze";
+import type { Result } from "./result";
 import { MAX_CELLS, oneLetter, type Authors, type Letters } from "./crossword";
 import { isPlayerName } from "./players";
 

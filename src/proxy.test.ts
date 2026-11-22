@@ -35,7 +35,7 @@ describe("proxy", () => {
   });
 
   it("answers locked API calls with 401 JSON", async () => {
-    for (const path of ["/api/room", "/api/analyze-crossword", "/api/photo", "/api/puzzle", "/api/puzzle/3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c"]) {
+    for (const path of ["/api/room", "/api/photo", "/api/puzzle", "/api/puzzle/3f2c1a9e-8b4d-4c6e-9a1b-2d3e4f5a6b7c"]) {
       const response = proxy(request(path));
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: "Lösenord krävs." });

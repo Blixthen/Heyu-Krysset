@@ -53,11 +53,10 @@ Pushes to `main` deploy to Cloudflare Workers through GitHub Actions
    `pnpm exec wrangler r2 bucket lifecycle add heyu expire-chat chat/ --expire-days 7`.
    R2 counts the days from an object's last write, so a room's chat lasts
    7 days from its latest message.
-3. After the first deploy, set the runtime secrets:
-   `pnpm exec wrangler secret put APP_PASSWORD` and
-   `pnpm exec wrangler secret put GEMINI_API_KEY`.
+3. After the first deploy, set the runtime secret:
+   `pnpm exec wrangler secret put APP_PASSWORD`.
 
-To run on the local Workers runtime, put those two secrets in `.dev.vars` and
+To run on the local Workers runtime, put that secret in `.dev.vars` and
 use `pnpm preview`.
 
 ## How it fits together
@@ -70,9 +69,8 @@ use `pnpm preview`.
   crossword's id to it (`src/lib/room.ts`): each crossword is its own room,
   with its own chat. Starting a crossword over stays in its room.
 - **Analysis**: the browser reads the letter squares from the photo's pixels
-  (`src/lib/gridImage.ts`). If it finds no grid, `/api/analyze-crossword`
-  sends the photo to Gemini and returns validated letter cells
-  (`src/lib/analyze.ts`).
+  (`src/lib/gridImage.ts`); the server never sees the photo until it is
+  shared.
 - **Photos**: the browser uploads a sharp copy of the photo to `/api/photo`
   (behind the gate), which stores it in the R2 bucket; the puzzle carries only
   its id, plus a small inline copy.

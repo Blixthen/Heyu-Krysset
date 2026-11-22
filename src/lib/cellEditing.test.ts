@@ -32,7 +32,7 @@ describe("addableCells", () => {
     const cells: LetterCell[] = [
       { row: 0, col: 0, x: 0, y: 0, w: 100, h: 100 },
       { row: 0, col: 1, x: 100, y: 0, w: 100, h: 100 },
-      // An irregular index from Gemini: right where (1, 0) would go.
+      // An irregular index, as in older puzzles: right where (1, 0) would go.
       { row: 4, col: 0, x: 10, y: 100, w: 100, h: 100 },
     ];
     const addable = keys(addableCells(cells, cells));
@@ -52,7 +52,7 @@ describe("addableCells", () => {
 
   it("doesn't offer a removed square back on top of one added in its place", () => {
     const top = gridCells(1, 3);
-    // Misnumbered by Gemini: it sits where (1, 0) belongs.
+    // Misnumbered, as in older puzzles: it sits where (1, 0) belongs.
     const stray = { row: 4, col: 0, x: 100, y: 200, w: 90, h: 90 };
     const added = toggleCell(top, at(addableCells(top, [...top, stray]), 1, 0) as LetterCell);
     expect(at(addableCells(top, [...top, stray]), 4, 0)).toEqual(stray);

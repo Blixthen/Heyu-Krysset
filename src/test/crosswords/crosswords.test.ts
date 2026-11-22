@@ -1,19 +1,13 @@
-import { interpretReply, parseAnalyzeRequest } from "@/lib/analyze";
 import { readGrid } from "@/lib/gridImage";
 import { gridCells } from "@/test/fixtures";
 import jpeg from "jpeg-js";
-import { existsSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { jpegSize } from "./overlay";
-import {
-  CROSSWORD_PHOTOS,
-  findProblems,
-  photoPath,
-  readPhotoBase64,
-  replyPath,
-  type CrosswordPhoto,
-  type RecordedReply,
-} from "./photos";
+import { jpegSize, renderOverlay } from "./overlay";
+import { CROSSWORD_PHOTOS, findProblems, photoPath, type CrosswordPhoto } from "./photos";
+
+/** Gitignored; each run draws the readings here for checking new thresholds by eye. */
+const OVERLAY_DIRECTORY = new URL("./overlays/", import.meta.url);
 
 const photo = (minCells: number, points: Partial<CrosswordPhoto> = {}): CrosswordPhoto => ({
   name: "test",
@@ -80,25 +74,15 @@ describe.each(CROSSWORD_PHOTOS)("crossword photo $name ($description)", (crosswo
     for (const [x, y] of points) expect([x, y].every((value) => value >= 0 && value <= 1000)).toBe(true);
   });
 
-  it("is accepted as an upload", () => {
-    const input = parseAnalyzeRequest({ image: readPhotoBase64(crossword), mimeType: "image/jpeg" });
-    expect(input.ok).toBe(true);
-  });
-
   it("is read by the image reading with exactly its known problems (most have none)", () => {
-    const cells = readGrid(jpeg.decode(readFileSync(photoPath(crossword)), { useTArray: true }));
+    const bytes = readFileSync(photoPath(crossword));
+    const cells = readGrid(jpeg.decode(bytes, { useTArray: true }));
+
+    mkdirSync(OVERLAY_DIRECTORY, { recursive: true });
+    const image = { base64: bytes.toString("base64"), ...jpegSize(bytes) };
+    writeFileSync(new URL(`${crossword.name}.svg`, OVERLAY_DIRECTORY), renderOverlay(crossword, image, cells ?? []));
+
     expect(cells, "no usable grid found").not.toBeNull();
     expect(findProblems(crossword, cells ?? [])).toEqual(crossword.knownGridProblems ?? []);
-  });
-
-  it("replays its recorded Gemini reply into exactly its known problems", () => {
-    const path = replyPath(crossword);
-    expect(existsSync(path), "no recorded reply; run `pnpm eval:record`").toBe(true);
-    const recorded = JSON.parse(readFileSync(path, "utf8")) as RecordedReply;
-    expect(recorded.reply.text, "recorded reply is empty").toEqual(expect.stringMatching(/\S/));
-
-    const result = interpretReply(recorded.reply);
-    expect(result, `recorded with ${recorded.model}`).toMatchObject({ ok: true });
-    if (result.ok) expect(findProblems(crossword, result.value)).toEqual(crossword.knownProblems ?? []);
   });
 });

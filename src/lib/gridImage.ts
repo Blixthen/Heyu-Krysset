@@ -38,7 +38,7 @@ export type Square = {
    * centre. Less certain than a fully blank square, so worth a second opinion.
    */
   marked: boolean;
-  /** Interior measurements, kept for tuning and for Gemini to double-check. */
+  /** Interior measurements, kept for tuning. */
   ink: number;
   brightness: number;
   spread: number;
@@ -1014,8 +1014,8 @@ export function toLetterCells(pixels: Pixels, squares: Square[]): LetterCell[] {
 
 /**
  * The whole reading: letter cells ready for a puzzle, or null when the photo
- * doesn't read as a usable grid (then the caller asks Gemini instead). Cells
- * pass the same validation as Gemini's, so either source yields the same shape.
+ * doesn't read as a usable grid. Cells pass the same validation as a peer's,
+ * so a puzzle read here is one every tab accepts.
  */
 export function readGrid(pixels: Pixels): LetterCell[] | null {
   const lum = luminance(pixels);

@@ -8,14 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "eval": "vitest run --config vitest.eval.config.mts",
-    "eval:record": "RECORD_REPLIES=1 vitest run --config vitest.eval.config.mts",
     "typecheck": "next typegen && tsc --noEmit",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
-    "@google/genai": "^3.0.0",
     "@supabase/supabase-js": "^2.119.0",
     "lucide-react": "^1.70.0",
     "next": "16.4.5",

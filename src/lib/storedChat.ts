@@ -1,4 +1,4 @@
-import type { Result } from "./analyze";
+import type { Result } from "./result";
 import { compareMessages, isChatMessage, MAX_MESSAGES, toChatMessage, type ChatMessage } from "./chat";
 import { isReaction, isReactionVersion, MAX_REACTORS, replacesHead, toReaction, type Reaction } from "./reactions";
 

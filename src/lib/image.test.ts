@@ -42,21 +42,13 @@ beforeEach(() => {
 const file = new File(["x"], "kryss.jpg");
 
 describe("prepareImages", () => {
-  it("keeps the analysis image at high quality and 1400px", async () => {
-    const renders = fakeCanvas(0.01);
-    const images = await prepareImages(file);
-    expect(renders[0]).toEqual({ width: 1400, quality: 0.82 });
-    expect(images.mimeType).toBe("image/jpeg");
-    expect(images.analyzeBase64).not.toContain("data:");
-  });
-
-  it("reads the pixels of the analysis image", async () => {
+  it("reads the pixels at 1400px", async () => {
     fakeCanvas(0.01);
     const images = await prepareImages(file);
     expect(images.pixels).toEqual({ width: 1400, height: 1960, from: 1400 });
   });
 
-  it("still prepares the JPEGs when the browser refuses to hand out pixels", async () => {
+  it("still prepares the share image when the browser refuses to hand out pixels", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       drawImage: vi.fn(),
       getImageData: () => {
@@ -67,7 +59,7 @@ describe("prepareImages", () => {
     fakeBlobs();
     const images = await prepareImages(file);
     expect(images.pixels).toBeNull();
-    expect(images.analyzeBase64).toBe("AAAA");
+    expect(images.shareDataUrl).toBe("data:image/jpeg;base64,AAAA");
   });
 
   it("uses the best share quality that fits the budget", async () => {
